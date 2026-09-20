@@ -32,6 +32,8 @@ packages:
     path: Packages/Chromaprint
   ProviderKit:
     path: Packages/ProviderKit
+  LibraryKit:
+    path: Packages/LibraryKit
 
 targets:
   drtagger:
@@ -48,6 +50,8 @@ targets:
         product: ChromaprintKit
       - package: ProviderKit
         product: ProviderKit
+      - package: LibraryKit
+        product: LibraryKit
     info:
       path: App/Info.plist
       properties:

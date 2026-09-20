@@ -126,11 +126,16 @@ blocks. Audio is never rewritten; stream MD5 is verified after each write.
 
 - **App**: SwiftUI, macOS 15+, Swift 6 strict concurrency, Observation.
   String Catalog with English base and Spanish localisation.
-- **Workflow**: album queue with states (pending → scanning → identifying →
-  confident / needs review → applying → done / error), an inspector per
-  album (candidates, tag diff, artwork, log), background jobs with progress.
-- **Persistence**: SwiftData store for albums, jobs, backups and provider
-  caches. (Swap for GRDB if SwiftData concurrency proves painful.)
+- **Workflow**: album queue with states (pending → scanning → scanned →
+  identifying → confident / needs review → applying → done, error from any
+  step), an inspector per album (candidates, tag diff, artwork, log),
+  background jobs with progress. `drtagger --add <path>…` scans paths at
+  launch (used by tests and scripts).
+- **Persistence**: SwiftData store in Application Support/drtagger
+  (`AlbumRecord`: scalar columns for the sidebar plus the scanner's
+  `DetectedAlbum` as JSON). All writes happen on the main context; the
+  scanner runs detached and hands back Sendable values. Jobs, backups and
+  provider caches join the same store in later phases.
 - **Distribution**: Developer ID, hardened runtime, notarised DMG. The design
   stays App Store compatible (sandbox + bookmarks) but that is not a goal.
 
@@ -143,6 +148,14 @@ blocks. Audio is never rewritten; stream MD5 is verified after each write.
   rate limiting per provider, on-disk response cache. WebDAV code dropped.
 
 ### New modules
+- `LibraryKit` (phase 1, done) — album discovery. `LibraryScanner` walks
+  folders and yields `DetectedAlbum`s of kind `sacdISO`, `cueImage`,
+  `cueMultiFile` or `trackFolder`, with multi-disc grouping (`CD1`, `Disc 2`…),
+  orphan CUEs kept as hints, artwork and log collection, junk filtering.
+  `CueSheet` parses CUE files with encoding detection (UTF-8/BOM, Shift-JIS by
+  double-byte runs, CP1251 by Cyrillic words, else CP1252/Latin-1) and
+  exposes barcode / catalog / DiscID hints from CATALOG and REM lines.
+  `SACDProbe` reads the Scarletbook master TOC, master text and area TOCs.
 - `ImageKit` — Scarletbook (SACD ISO) reader: master TOC, area TOCs, disc
   text, track list, DSD/DST frame extraction, DSF writer. Written from the
   Scarletbook specification, no GPL code. Layout verified against 205 real
@@ -185,9 +198,9 @@ Responses cached on disk keyed by URL with provider-specific TTLs.
 ## 4. Delivery phases
 
 0. Scaffold: XcodeGen project, copied packages made macOS-only, ffmpeg build
-   script, settings + Keychain, empty queue UI.
+   script, settings + Keychain, empty queue UI. **Done 2026-09-20.**
 1. Library scan and album detection (ISO / image+CUE / track folder), queue
-   with states, SwiftData store.
+   with states, SwiftData store. **Done 2026-09-20.**
 2. CUE parsing, image splitting with verification, DiscID, CTDB check.
 3. SACD ISO reader, DSF extraction, DST via ffmpeg, disc text.
 4. Identification pipeline: artwork barcode/OCR, DiscID, tags, fingerprints,

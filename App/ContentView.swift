@@ -1,16 +1,19 @@
+import LibraryKit
+import SwiftData
 import SwiftUI
 
 struct ContentView: View {
-    @Environment(AlbumQueue.self) private var queue
+    @Environment(LibraryController.self) private var library
 
     var body: some View {
-        @Bindable var queue = queue
+        @Bindable var library = library
         NavigationSplitView {
-            QueueSidebar(selection: $queue.selection)
-                .navigationSplitViewColumnWidth(min: 260, ideal: 320, max: 480)
+            QueueSidebar(selection: $library.selection)
+                .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 520)
         } detail: {
-            if let album = queue.album(id: queue.selection) {
-                AlbumInspectorView(album: album)
+            if let record = library.record(id: library.selection) {
+                AlbumInspectorView(record: record)
+                    .id(record.persistentModelID)
             } else {
                 ContentUnavailableView(
                     "No Album Selected",
@@ -20,128 +23,177 @@ struct ContentView: View {
             }
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                if library.isScanning {
+                    ProgressView()
+                        .controlSize(.small)
+                        .help(library.currentFolder ?? String(localized: "Scanning…"))
+                }
                 Button {
-                    queue.presentAddPanel()
+                    if let record = library.record(id: library.selection) {
+                        Task { await library.rescan(record) }
+                    }
+                } label: {
+                    Label("Rescan", systemImage: "arrow.clockwise")
+                }
+                .disabled(library.selection == nil || library.isScanning)
+                .help("Scan the selected album's folder again")
+
+                Button {
+                    library.presentAddPanel()
                 } label: {
                     Label("Add Folders…", systemImage: "plus")
                 }
+                .disabled(library.isScanning)
                 .help("Add folders or image files to the queue")
             }
         }
         .dropDestination(for: URL.self) { urls, _ in
-            !queue.add(urls: urls).isEmpty
+            guard !library.isScanning else { return false }
+            Task { await library.addRoots(urls) }
+            return true
         }
         .navigationTitle("drtagger")
+        .task {
+            await library.importLaunchArguments()
+        }
     }
 }
 
-// Left column: the album queue with per-entry state.
+// Left column: every album in the store, newest first.
 struct QueueSidebar: View {
-    @Environment(AlbumQueue.self) private var queue
-    @Binding var selection: QueuedAlbum.ID?
+    @Environment(LibraryController.self) private var library
+    @Query(sort: \AlbumRecord.addedAt, order: .reverse) private var albums: [AlbumRecord]
+    @Binding var selection: PersistentIdentifier?
+    @State private var search = ""
+
+    private var filtered: [AlbumRecord] {
+        let q = search.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return albums }
+        return albums.filter {
+            $0.displayTitle.localizedCaseInsensitiveContains(q)
+                || ($0.artistHint?.localizedCaseInsensitiveContains(q) ?? false)
+                || $0.path.localizedCaseInsensitiveContains(q)
+        }
+    }
 
     var body: some View {
         List(selection: $selection) {
-            ForEach(queue.albums) { album in
-                QueueRow(album: album)
-                    .tag(album.id)
+            ForEach(filtered) { record in
+                QueueRow(record: record)
+                    .tag(record.persistentModelID)
                     .contextMenu {
-                        Button("Remove from Queue") {
-                            queue.remove(ids: [album.id])
+                        Button("Rescan") {
+                            Task { await library.rescan(record) }
                         }
                         Button("Show in Finder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([album.url])
+                            NSWorkspace.shared.activateFileViewerSelecting([record.url])
+                        }
+                        Divider()
+                        Button("Remove from Queue", role: .destructive) {
+                            library.remove([record])
                         }
                     }
             }
         }
+        .searchable(text: $search, placement: .sidebar, prompt: "Filter albums")
         .onDeleteCommand {
-            if let sel = selection {
-                queue.remove(ids: [sel])
+            if let record = library.record(id: selection) {
+                library.remove([record])
             }
         }
         .overlay {
-            if queue.albums.isEmpty {
+            if albums.isEmpty && !library.isScanning {
                 ContentUnavailableView {
                     Label("Queue is Empty", systemImage: "tray")
                 } description: {
                     Text("Drop folders here, or use Add Folders… (⌘O).")
                 } actions: {
                     Button("Add Folders…") {
-                        queue.presentAddPanel()
+                        library.presentAddPanel()
                     }
                 }
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            QueueStatusBar(count: albums.count)
+        }
+    }
+}
+
+struct QueueStatusBar: View {
+    @Environment(LibraryController.self) private var library
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if library.isScanning {
+                ProgressView().controlSize(.mini)
+                Text(library.currentFolder.map { String(localized: "Scanning \($0)…") } ?? String(localized: "Scanning…"))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else if let summary = library.lastScanSummary {
+                Text(summary)
+                    .lineLimit(1)
+            } else {
+                Text(count == 1 ? String(localized: "1 album") : String(localized: "\(count) albums"))
+            }
+            Spacer()
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.bar)
     }
 }
 
 struct QueueRow: View {
-    let album: QueuedAlbum
+    let record: AlbumRecord
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: album.state.systemImage)
-                .foregroundStyle(iconColor)
-                .frame(width: 18)
+            Image(systemName: kindImage)
+                .foregroundStyle(.secondary)
+                .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
-                Text(album.displayName)
+                Text(record.displayTitle)
                     .lineLimit(1)
-                Text(album.state.label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let artist = record.artistHint, !artist.isEmpty {
+                    Text(artist)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Text(record.subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
+            Spacer(minLength: 4)
+            Image(systemName: record.state.systemImage)
+                .foregroundStyle(stateColor)
+                .help(record.state.label)
         }
         .padding(.vertical, 2)
     }
 
-    private var iconColor: Color {
-        switch album.state {
+    private var kindImage: String {
+        switch record.kind {
+        case .sacdISO: return "opticaldiscdrive"
+        case .cueImage: return "opticaldisc"
+        case .cueMultiFile: return "list.bullet.rectangle"
+        case .trackFolder: return "folder"
+        }
+    }
+
+    private var stateColor: Color {
+        switch record.state {
         case .confident, .done: return .green
         case .needsReview: return .orange
         case .error: return .red
+        case .scanning, .identifying, .applying: return .accentColor
         default: return .secondary
         }
     }
-}
-
-// Right column placeholder. Phase 1 replaces this with the real inspector
-// (candidates, tag diff, artwork, log).
-struct AlbumInspectorView: View {
-    let album: QueuedAlbum
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 12) {
-                Image(systemName: "opticaldisc")
-                    .font(.system(size: 36))
-                    .foregroundStyle(.secondary)
-                VStack(alignment: .leading) {
-                    Text(album.displayName)
-                        .font(.title2)
-                        .bold()
-                    Text(album.url.path)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
-            }
-            Divider()
-            LabeledContent("State", value: album.state.label)
-            LabeledContent("Added", value: album.addedAt.formatted(date: .abbreviated, time: .shortened))
-            Spacer()
-            Text("Scanning and identification arrive in the next phase.")
-                .font(.footnote)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-    }
-}
-
-#Preview {
-    ContentView()
-        .environment(AlbumQueue())
-        .environment(AppSettings())
 }
