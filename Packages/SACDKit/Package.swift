@@ -17,6 +17,7 @@ let package = Package(
         .package(path: "../LibraryKit"),
         .package(path: "../FLACKit"),
         .package(path: "../SplitKit"),
+        .package(path: "../DSTKit"),
     ],
     targets: [
         .target(
@@ -25,6 +26,7 @@ let package = Package(
                 .product(name: "LibraryKit", package: "LibraryKit"),
                 .product(name: "FLACKit", package: "FLACKit"),
                 .product(name: "SplitKit", package: "SplitKit"),
+                .product(name: "DSTKit", package: "DSTKit"),
             ],
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency"),

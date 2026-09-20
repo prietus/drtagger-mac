@@ -1,3 +1,4 @@
+import DSTKit
 import FLACKit
 import Foundation
 import LibraryKit
@@ -50,14 +51,14 @@ public struct SACDExtractOutcome: Sendable, Equatable, Codable {
 }
 
 public enum SACDExtractError: LocalizedError, Equatable {
-    case dstNotSupported
+    case dstDecodeFailed(timecode: String, reason: String)
     case noTracks
     case outputExists(String)
     case frameSizeMismatch(expected: Int, got: Int, timecode: String)
 
     public var errorDescription: String? {
         switch self {
-        case .dstNotSupported: return "This area is DST-compressed; DST decoding is not available yet."
+        case .dstDecodeFailed(let t, let r): return "DST frame at \(t) could not be decoded: \(r)"
         case .noTracks: return "The area has no tracks."
         case .outputExists(let n): return "\(n) already exists. Enable overwrite to replace it."
         case .frameSizeMismatch(let e, let g, let t): return "Frame at \(t) has \(g) bytes, expected \(e)."
@@ -85,7 +86,6 @@ public struct SACDExtractor: Sendable {
         progress: @escaping @Sendable (SACDExtractProgress) -> Void = { _ in }
     ) throws -> SACDExtractOutcome {
         let started = Date()
-        guard !area.isDST else { throw SACDExtractError.dstNotSupported }
         guard !area.tracks.isEmpty else { throw SACDExtractError.noTracks }
         var warnings: [String] = []
 
@@ -131,9 +131,24 @@ public struct SACDExtractor: Sendable {
             windows.append(Window(track: track, start: start, end: end, url: url))
         }
 
-        // Stream frames.
+        // Stream frames; DST areas are decoded in parallel batches.
         let reader = try SACDFrameReader(url: disc.url, firstSector: area.audioStartSector, lastSector: area.audioEndSector)
         let frameBytes = area.dsdFrameBytes
+        let dstBatch: DSTBatchDecoder? = area.isDST ? try DSTBatchDecoder(channels: area.channelCount, sampleRate: area.sampleRate) : nil
+        var decoded: [SACDFrame] = []
+        var decodedIndex = 0
+        func nextFrame() throws -> SACDFrame? {
+            guard let dstBatch else { return try reader.next() }
+            if decodedIndex == decoded.count {
+                var batch: [SACDFrame] = []
+                while batch.count < dstBatch.batchSize, let f = try reader.next() { batch.append(f) }
+                if batch.isEmpty { return nil }
+                decoded = try dstBatch.decode(batch)
+                decodedIndex = 0
+            }
+            defer { decodedIndex += 1 }
+            return decoded[decodedIndex]
+        }
         var outputs: [SACDTrackOutput] = []
         var windowIndex = 0
         var writer: DSFWriter? = nil
@@ -161,7 +176,7 @@ public struct SACDExtractor: Sendable {
             writerContiguous = true
         }
 
-        while let frame = try reader.next() {
+        while let frame = try nextFrame() {
             try Task.checkCancellation()
             frameCounter += 1
             if frameCounter % 750 == 0 {
@@ -251,5 +266,43 @@ public struct SACDExtractor: Sendable {
 
     static func id3(for track: SACDTrack, disc: SACDDisc, area: SACDArea) -> Data {
         ID3v2Bridge.toID3v23(comment(for: track, disc: disc, area: area)).encodedV23()
+    }
+}
+
+// Decodes DST frames concurrently, one decoder per slot, keeping order.
+final class DSTBatchDecoder {
+    let batchSize: Int
+    private let decoders: [DSTDecoder]
+
+    init(channels: Int, sampleRate: Int, batchSize: Int = 48) throws {
+        self.batchSize = batchSize
+        decoders = try (0..<batchSize).map { _ in try DSTDecoder(channels: channels, sampleRate: sampleRate) }
+    }
+
+    func decode(_ frames: [SACDFrame]) throws -> [SACDFrame] {
+        precondition(frames.count <= batchSize)
+        let results = UnsafeMutablePointer<Data?>.allocate(capacity: frames.count)
+        results.initialize(repeating: nil, count: frames.count)
+        defer { results.deinitialize(count: frames.count); results.deallocate() }
+        let errors = UnsafeMutablePointer<(any Error)?>.allocate(capacity: frames.count)
+        errors.initialize(repeating: nil, count: frames.count)
+        defer { errors.deinitialize(count: frames.count); errors.deallocate() }
+
+        DispatchQueue.concurrentPerform(iterations: frames.count) { i in
+            do {
+                results[i] = try decoders[i].decode(frames[i].data)
+            } catch {
+                errors[i] = error
+            }
+        }
+        var out: [SACDFrame] = []
+        out.reserveCapacity(frames.count)
+        for i in 0..<frames.count {
+            if let e = errors[i] {
+                throw SACDExtractError.dstDecodeFailed(timecode: frames[i].timecode.description, reason: e.localizedDescription)
+            }
+            out.append(SACDFrame(timecode: frames[i].timecode, data: results[i]!))
+        }
+        return out
     }
 }

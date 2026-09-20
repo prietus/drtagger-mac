@@ -9,8 +9,6 @@ struct SACDExtractView: View {
     @Environment(DiscService.self) private var disc
     @Environment(AppSettings.self) private var settings
 
-    private var stereoIsDST: Bool { sacd.stereoArea?.isDST ?? false }
-
     var body: some View {
         GroupBox("Extract") {
             VStack(alignment: .leading, spacing: 10) {
@@ -22,10 +20,6 @@ struct SACDExtractView: View {
                               systemImage: ok ? "checkmark.circle.fill" : "exclamationmark.triangle")
                             .font(.callout)
                             .foregroundStyle(ok ? .green : .orange)
-                    } else if stereoIsDST {
-                        Label("DST-compressed disc: extraction needs the DST decoder (coming in this phase)", systemImage: "hourglass")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
                     } else {
                         Text("Not extracted yet").font(.callout).foregroundStyle(.tertiary)
                     }
@@ -33,7 +27,7 @@ struct SACDExtractView: View {
                     Button(record.sacdOutcomes.isEmpty ? "Extract to Library…" : "Extract Again…") {
                         startExtract()
                     }
-                    .disabled(disc.isBusy(record) || stereoIsDST)
+                    .disabled(disc.isBusy(record))
                 }
                 Text(policyDescription)
                     .font(.caption)
@@ -64,6 +58,7 @@ struct SACDExtractView: View {
 
     private var policyDescription: String {
         var parts: [String] = []
+        if sacd.hasDST { parts.append(String(localized: "DST-compressed, decoded losslessly")) }
         parts.append(settings.sacdPausePolicy == .drop
                      ? String(localized: "Pauses between tracks are dropped")
                      : String(localized: "Pauses between tracks stay with the previous track"))

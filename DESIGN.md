@@ -185,7 +185,20 @@ blocks. Audio is never rewritten; stream MD5 is verified after each write.
   with a pause policy (append to previous, the default, or drop as
   sacd_extract does). Verified 2026-09-21: extracting "A Love Supreme" with
   the drop policy reproduces sacd_extract's three DSF files byte for byte.
-  DST areas are parsed but refused until `DSTKit` exists.
+  DST areas go through `DSTKit` in parallel batches (one decoder per slot,
+  `DispatchQueue.concurrentPerform`), frames stay in order.
+- `DSTKit` (phase 3, done) — DST (ISO/IEC 14496-3 subpart 10) decoder that
+  emits the DSD bitstream, a Swift port of FFmpeg's LGPL `dstdec.c` stopped
+  before its DSD→PCM stage: MSB-first bit reader, JPEG-LS Rice-Golomb codes,
+  filter/probability tables with prediction, 12-bit arithmetic decoder,
+  128-bit per-channel history with 16 table lookups per sample. Output is
+  interleaved per channel MSB first, the same layout as uncompressed frames,
+  so the DSF writer is shared. Handles the "uncompressed DST frame" case and
+  reports multi-segment frames as unsupported (no SACD uses them). The
+  package is LGPL 2.1+ (see Packages/DSTKit/LICENSE). Verified 2026-09-21:
+  a 1.8 GB DST disc (14 tracks) extracted with the drop policy matches
+  sacd_extract's DSF output byte for byte; Release throughput ~24x realtime
+  per core (33 s for the disc with parallel batches), Debug ~1.5x per core.
 - `SplitKit` (phase 2, done) — `FFmpegTool` drives the bundled ffmpeg
   (ffprobe JSON, decode to raw PCM, FLAC encode from a stdin pipe with a
   running MD5/CRC of the bytes fed). `ImageSplitter` decodes the image (or
@@ -196,12 +209,6 @@ blocks. Audio is never rewritten; stream MD5 is verified after each write.
   `{albumartist}/{album} ({year})/{track} {title}` safely. Verified on a
   real XRCD rip: all five track CRCs and the disc CRC equal the CTDB entry.
   ReplayGain / `ebur128` still to come (phase 6).
-- `DSTKit` — DST (Direct Stream Transfer) decoder that outputs the DSD
-  bitstream. Verified on 2026-09-20: ffmpeg's `dst` decoder always runs its
-  DSD→PCM filter and emits float PCM, so it cannot produce lossless DSF from
-  a DST disc. Plan: vendor ffmpeg's LGPL `libavcodec/dstdec.c` (plus its
-  arithmetic decoder and tables, minus the dsd2pcm stage) as a C target
-  like `Chromaprint`, with source shipped for LGPL compliance. Phase 3.
 - `Identify` — signal collection, candidate ranking, confidence.
 - `TagMap` — Picard schema ↔ container writers, merge with locked fields.
 - `ArtworkScan` — Vision OCR + barcode (port of drtagger `ArtworkScanner` to
@@ -229,8 +236,7 @@ Responses cached on disk keyed by URL with provider-specific TTLs.
    with states, SwiftData store. **Done 2026-09-20.**
 2. CUE parsing, image splitting with verification, DiscID, CTDB check.
    **Done 2026-09-20** (inspector "Disc" section, `--split-into <folder>`).
-3. SACD ISO reader, DSF extraction, disc text. **DSD part done 2026-09-21**;
-   DST decoding (`DSTKit`) pending.
+3. SACD ISO reader, DSF extraction, disc text, DST decoding. **Done 2026-09-21.**
 4. Identification pipeline: artwork barcode/OCR, DiscID, tags, fingerprints,
    voting, confidence; providers MB / Discogs / CAA / fanart / iTunes / Deezer.
 5. Tag mapping and writers for every container, artwork policy, preview with

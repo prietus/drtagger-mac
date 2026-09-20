@@ -1,0 +1,7 @@
+DSTKit is a Swift port of the Direct Stream Transfer decoder from FFmpeg
+(libavcodec/dstdec.c, Copyright (c) 2014 Peter Ross) and is therefore
+distributed under the GNU Lesser General Public License, version 2.1 or
+later. The full license text is available at
+https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html and, for the
+original code, in the FFmpeg source tree recorded in
+Vendor/ffmpeg/BUILD-INFO.txt of this repository.

@@ -57,7 +57,8 @@ struct FakeDisc {
         var streamOffset = 0
         for f in 0..<totalFrames {
             frameStarts.append((streamOffset, SACDTime(totalFrames: f)))
-            let d = FakeDisc.frameData(index: f, bytes: frameBytes)
+            var d = FakeDisc.frameData(index: f, bytes: frameBytes)
+            if dst { d.insert(0x00, at: 0) }        // "uncompressed" DST frame header
             pending.append(d)
             streamOffset += d.count
         }
@@ -347,22 +348,34 @@ struct SyntheticTests {
         }
     }
 
-    @Test func dstAreaIsRefusedForNow() throws {
+    @Test func dstAreaWithUncompressedFramesExtracts() throws {
         let dir = try Samples.temp("dst")
         defer { try? FileManager.default.removeItem(at: dir) }
+        let out = try Samples.temp("dstout")
+        defer { try? FileManager.default.removeItem(at: out) }
         let iso = dir.appending(path: "fake.iso")
-        try Self.makeDisc(dst: true).write(to: iso)
+        let fake = Self.makeDisc(dst: true)
+        try fake.write(to: iso)
         let disc = try SACDDiscReader.read(url: iso)
         let area = try #require(disc.stereoArea)
         #expect(area.isDST)
-        // Frames still parse (4-byte frame infos).
+        // Frames parse with 4-byte frame infos and carry the 1-byte DST header.
         let reader = try SACDFrameReader(url: iso, firstSector: area.audioStartSector, lastSector: area.audioEndSector)
         var n = 0
-        while let f = try reader.next() { #expect(f.timecode.totalFrames == n); n += 1 }
-        #expect(n == 600)
-        #expect(throws: SACDExtractError.dstNotSupported) {
-            try SACDExtractor().extract(disc: disc, area: area, destinationRoot: dir)
+        while let f = try reader.next() {
+            #expect(f.timecode.totalFrames == n)
+            #expect(f.data.count == fake.frameBytes + 1)
+            n += 1
         }
+        #expect(n == 600)
+        // The DST path decodes (pass-through here) and writes the same DSF as the DSD path would.
+        let outcome = try SACDExtractor().extract(disc: disc, area: area, destinationRoot: out)
+        #expect(outcome.verified, "warnings \(outcome.warnings)")
+        #expect(outcome.tracks.map(\.frames) == [225, 150, 75])
+        let bytes = try Data(contentsOf: outcome.tracks[1].url)
+        let frame375 = FakeDisc.frameData(index: 375, bytes: fake.frameBytes)
+        #expect(bytes[92] == DSFWriter.bitReverse[Int(frame375[0])])
+        #expect(bytes[92 + 4096] == DSFWriter.bitReverse[Int(frame375[1])])
     }
 
     @Test func dsfWriterPadsAndReportsSizes() throws {
@@ -416,6 +429,76 @@ struct RealImageTests {
         #expect(area.tracks[1].title == "BACH:Goldberg Variations Variation 1")
         #expect(area.tracks[0].isrc == "USSM18100503")
         #expect(area.tracks[31].isrc == "USSM18100534")
+    }
+
+    // Decodes the first second of a real DST disc: every frame must decode
+    // to a full DSD frame whose bit density looks like music, not noise
+    // from a wrong table or a desynchronised arithmetic decoder.
+    @Test func decodesRealDSTFrames() throws {
+        guard let iso = Samples.spaceOddityISO else { return }
+        let disc = try SACDDiscReader.read(url: iso)
+        let area = try #require(disc.stereoArea)
+        let reader = try SACDFrameReader(url: iso, firstSector: area.audioStartSector, lastSector: area.audioEndSector)
+        let batch = try DSTBatchDecoder(channels: area.channelCount, sampleRate: area.sampleRate, batchSize: 75)
+        var frames: [SACDFrame] = []
+        while frames.count < 75, let f = try reader.next() { frames.append(f) }
+        #expect(frames.count == 75)
+        let decoded = try batch.decode(frames)
+        #expect(decoded.count == 75)
+        var previous: Data? = nil
+        for f in decoded {
+            #expect(f.data.count == area.dsdFrameBytes)
+            let ones = f.data.reduce(0) { $0 + $1.nonzeroBitCount }
+            let density = Double(ones) / Double(f.data.count * 8)
+            #expect(density > 0.35 && density < 0.65, "bit density \(density) at \(f.timecode)")
+            #expect(f.data != previous)
+            previous = f.data
+        }
+    }
+
+    // Byte-for-byte against sacd_extract on a DST disc. DRTAGGER_SLOW_TESTS=1.
+    @Test func dstExtractionMatchesSACDExtract() throws {
+        guard ProcessInfo.processInfo.environment["DRTAGGER_SLOW_TESTS"] == "1" else { return }
+        let dir = Samples.root.appending(path: "dst/Chopin")
+        let iso = dir.appending(path: "Chopin, Liszt, Debussy Piano Peaces.iso")
+        guard FileManager.default.fileExists(atPath: iso.path),
+              let names = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return }
+        let reference = names.filter { $0.hasSuffix(".dsf") }.sorted().map { dir.appending(path: $0) }
+        guard !reference.isEmpty else { return }
+        let out = try Samples.temp("chopin")
+        defer { try? FileManager.default.removeItem(at: out) }
+
+        let disc = try SACDDiscReader.read(url: iso)
+        let area = try #require(disc.stereoArea)
+        #expect(area.isDST)
+        var options = SACDExtractOptions()
+        options.pausePolicy = .drop
+        let started = Date()
+        let outcome = try SACDExtractor().extract(disc: disc, area: area, destinationRoot: out, options: options)
+        print(String(format: "DST extraction: %d tracks in %.1f s", outcome.tracks.count, Date().timeIntervalSince(started)))
+        #expect(outcome.verified, "warnings \(outcome.warnings)")
+
+        for (mine, theirs) in zip(outcome.tracks, reference) {
+            let a = try DSFFile(source: FileHandleDataSource(url: mine.url))
+            let b = try DSFFile(source: FileHandleDataSource(url: theirs))
+            #expect(a.sampleCount == b.sampleCount, "\(mine.url.lastPathComponent) vs \(theirs.lastPathComponent)")
+            let fa = try FileHandle(forReadingFrom: mine.url), fb = try FileHandle(forReadingFrom: theirs)
+            defer { try? fa.close(); try? fb.close() }
+            try fa.seek(toOffset: a.dataChunkOffset + 12)
+            try fb.seek(toOffset: b.dataChunkOffset + 12)
+            var remaining = Int(min(a.dataChunkSize, b.dataChunkSize)) - 12
+            var offset = 0
+            var equal = true
+            while remaining > 0 && equal {
+                let n = min(4 << 20, remaining)
+                let x = try fa.read(upToCount: n) ?? Data()
+                let y = try fb.read(upToCount: n) ?? Data()
+                if x != y { equal = false }
+                remaining -= n
+                offset += n
+            }
+            #expect(equal, "audio differs in \(mine.url.lastPathComponent) near byte \(offset)")
+        }
     }
 
     @Test func parsesDSTDisc() throws {

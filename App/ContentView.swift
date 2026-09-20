@@ -85,7 +85,7 @@ extension ContentView {
     func extractFromLaunchArguments(_ arguments: [String] = CommandLine.arguments) async {
         guard let index = arguments.firstIndex(of: "--extract-into"), index + 1 < arguments.count else { return }
         let destination = URL(fileURLWithPath: NSString(string: arguments[index + 1]).expandingTildeInPath, isDirectory: true)
-        for record in library.allRecords() where record.kind == .sacdISO && !record.hasDST {
+        for record in library.allRecords() where record.kind == .sacdISO {
             var options = SACDExtractOptions()
             options.overwriteExisting = true
             options.pausePolicy = settings.sacdPausePolicy

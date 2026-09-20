@@ -38,6 +38,8 @@ packages:
     path: Packages/SplitKit
   SACDKit:
     path: Packages/SACDKit
+  DSTKit:
+    path: Packages/DSTKit
 
 targets:
   drtagger:
@@ -60,6 +62,8 @@ targets:
         product: SplitKit
       - package: SACDKit
         product: SACDKit
+      - package: DSTKit
+        product: DSTKit
     info:
       path: App/Info.plist
       properties:
