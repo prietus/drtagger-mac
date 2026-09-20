@@ -1,4 +1,5 @@
 import LibraryKit
+import SACDKit
 import SplitKit
 import SwiftData
 import SwiftUI
@@ -60,6 +61,7 @@ struct ContentView: View {
         .task {
             await library.importLaunchArguments()
             await splitFromLaunchArguments()
+            await extractFromLaunchArguments()
         }
     }
 }
@@ -74,6 +76,20 @@ extension ContentView {
             var options = SplitOptions()
             options.overwriteExisting = true
             await disc.split(record, into: destination, locator: settings.ffmpegLocator, options: options)
+        }
+    }
+}
+
+extension ContentView {
+    // `--extract-into <folder>` extracts every SACD ISO in the store.
+    func extractFromLaunchArguments(_ arguments: [String] = CommandLine.arguments) async {
+        guard let index = arguments.firstIndex(of: "--extract-into"), index + 1 < arguments.count else { return }
+        let destination = URL(fileURLWithPath: NSString(string: arguments[index + 1]).expandingTildeInPath, isDirectory: true)
+        for record in library.allRecords() where record.kind == .sacdISO && !record.hasDST {
+            var options = SACDExtractOptions()
+            options.overwriteExisting = true
+            options.pausePolicy = settings.sacdPausePolicy
+            await disc.extractSACD(record, into: destination, multichannel: settings.extractMultichannel, options: options)
         }
     }
 }

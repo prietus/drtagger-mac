@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SACDKit
 
 // User-visible configuration that survives launches. Plain values live in
 // UserDefaults; provider credentials live in the Keychain. The app ships
@@ -21,6 +22,7 @@ final class AppSettings {
         static let embedCoverMaxPixels = "artwork.embedMaxPixels"
         static let moveOriginalsToTrash = "split.moveOriginalsToTrash"
         static let extractMultichannel = "sacd.extractMultichannel"
+        static let sacdPausePolicy = "sacd.pausePolicy"
     }
 
     // Destination library root for split tracks. Empty = not configured.
@@ -40,6 +42,12 @@ final class AppSettings {
     }
     var extractMultichannel: Bool {
         didSet { defaults.set(extractMultichannel, forKey: Key.extractMultichannel) }
+    }
+    // What happens to audio between a SACD track's TOC end and the next
+    // track: kept at the end of the previous track (like CD gaps) or dropped
+    // (sacd_extract behaviour).
+    var sacdPausePolicy: SACDExtractOptions.PausePolicy {
+        didSet { defaults.set(sacdPausePolicy.rawValue, forKey: Key.sacdPausePolicy) }
     }
 
     var acoustIDKey: String {
@@ -62,6 +70,7 @@ final class AppSettings {
         embedCoverMaxPixels = px > 0 ? px : 1500
         moveOriginalsToTrash = defaults.bool(forKey: Key.moveOriginalsToTrash)
         extractMultichannel = defaults.bool(forKey: Key.extractMultichannel)
+        sacdPausePolicy = defaults.string(forKey: Key.sacdPausePolicy).flatMap(SACDExtractOptions.PausePolicy.init(rawValue:)) ?? .appendToPrevious
         acoustIDKey = Keychain.get(KeychainAccount.acoustIDKey) ?? ""
         discogsToken = Keychain.get(KeychainAccount.discogsToken) ?? ""
         fanartKey = Keychain.get(KeychainAccount.fanartKey) ?? ""

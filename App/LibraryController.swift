@@ -25,6 +25,16 @@ final class LibraryController {
     init(container: ModelContainer) {
         self.container = container
         self.context = container.mainContext
+        resetTransientStates()
+    }
+
+    // A previous run may have died mid-operation; those states mean
+    // nothing after a relaunch.
+    private func resetTransientStates() {
+        for record in allRecords() where [.scanning, .identifying, .applying].contains(record.state) {
+            record.state = .scanned
+        }
+        try? context.save()
     }
 
     // MARK: Adding

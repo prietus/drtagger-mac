@@ -166,17 +166,26 @@ blocks. Audio is never rewritten; stream MD5 is verified after each write.
   MusicBrainz Disc ID, FreeDB ID (checked against real REM DISCIDs) and the
   CUETools DB TOC string; `CueSplitPlan` gives sample-accurate track ranges
   (gaps appended to the previous track, HTOA as track 00 above a threshold).
-- `ImageKit` — Scarletbook (SACD ISO) reader: master TOC, area TOCs, disc
-  text, track list, DSD/DST frame extraction, DSF writer. Written from the
-  Scarletbook specification, no GPL code. Layout verified against 205 real
-  ISOs on 2026-09-20 (2048-byte sectors; master TOC at sector 510, `SACDMTOC`;
-  area starts at master offsets 64/72; area TOC: frame format at byte 21
-  (0 DST, 2/3 DSD), channel count at 32, track offset/count at 68/69,
-  track start/end sectors at 72/76, play time at 64). Disc text uses
-  per-locale character sets (ISO 646, ISO 8859-1, …) and is often empty or
-  wrong, hence a fallback signal only. sacd_extract XML sidecars next to
-  the ISOs serve as ground truth for parser tests. CUE parser with encoding sniffing,
-  TOC → MusicBrainz DiscID, CTDB TOC id.
+- `SACDKit` (phase 3, DSD part done) — Scarletbook (SACD ISO) reader and
+  extractor. `SACDDiscReader` parses the master TOC / text and, per area, the
+  TOC, `SACDTRL1` (track start sectors and lengths), `SACDTRL2` (track start
+  time codes and durations), `SACD_IGL` (12-char ISRCs, then genre codes) and
+  `SACDTTxt` (u16 position per track; item count + items of {type, reserved,
+  NUL text} padded to 4; types 1 title, 2 performer, 3 songwriter, 4 composer,
+  5 arranger, 6 message). `SACDFrameReader` walks the audio sectors: header
+  byte = packet_info_count:3, frame_info_count:3, reserved:1, dst:1; packet
+  entries of 2 bytes (frame_start:1, reserved:1, data_type:3 with 2 = audio,
+  length:11); frame infos of 3 bytes (min, sec, frame) for DSD or 4 for DST;
+  payloads follow. A frame is the bytes from one frame_start to the next; a
+  stereo DSD frame is 9408 bytes, interleaved per channel, MSB-first bits.
+  Tracks have TOC durations shorter than the gap to the next track (a pause,
+  like a CD pregap) and a 2 s lead-in before track 1. `DSFWriter` de-
+  interleaves into 4096-byte channel blocks with bit reversal and appends an
+  ID3v2.3 tag (via FLACKit's bridge). `SACDExtractor` cuts by frame time code
+  with a pause policy (append to previous, the default, or drop as
+  sacd_extract does). Verified 2026-09-21: extracting "A Love Supreme" with
+  the drop policy reproduces sacd_extract's three DSF files byte for byte.
+  DST areas are parsed but refused until `DSTKit` exists.
 - `SplitKit` (phase 2, done) — `FFmpegTool` drives the bundled ffmpeg
   (ffprobe JSON, decode to raw PCM, FLAC encode from a stdin pipe with a
   running MD5/CRC of the bytes fed). `ImageSplitter` decodes the image (or
@@ -220,7 +229,8 @@ Responses cached on disk keyed by URL with provider-specific TTLs.
    with states, SwiftData store. **Done 2026-09-20.**
 2. CUE parsing, image splitting with verification, DiscID, CTDB check.
    **Done 2026-09-20** (inspector "Disc" section, `--split-into <folder>`).
-3. SACD ISO reader, DSF extraction, DST via ffmpeg, disc text.
+3. SACD ISO reader, DSF extraction, disc text. **DSD part done 2026-09-21**;
+   DST decoding (`DSTKit`) pending.
 4. Identification pipeline: artwork barcode/OCR, DiscID, tags, fingerprints,
    voting, confidence; providers MB / Discogs / CAA / fanart / iTunes / Deezer.
 5. Tag mapping and writers for every container, artwork policy, preview with

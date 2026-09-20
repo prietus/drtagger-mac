@@ -21,6 +21,7 @@ struct AlbumInspectorView: View {
                     }
                     if let sacd = detected.sacd {
                         sacdSection(sacd)
+                        SACDExtractView(record: record, sacd: sacd)
                     }
                     ForEach(detected.discs, id: \.number) { disc in
                         discSection(disc, showNumber: detected.discs.count > 1)

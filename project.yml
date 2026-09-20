@@ -36,6 +36,8 @@ packages:
     path: Packages/LibraryKit
   SplitKit:
     path: Packages/SplitKit
+  SACDKit:
+    path: Packages/SACDKit
 
 targets:
   drtagger:
@@ -56,6 +58,8 @@ targets:
         product: LibraryKit
       - package: SplitKit
         product: SplitKit
+      - package: SACDKit
+        product: SACDKit
     info:
       path: App/Info.plist
       properties:

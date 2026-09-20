@@ -1,6 +1,7 @@
 import Foundation
 import LibraryKit
 import ProviderKit
+import SACDKit
 import SplitKit
 import SwiftData
 
@@ -31,6 +32,7 @@ final class AlbumRecord {
     var tocData: Data?
     var ctdbData: Data?
     var splitOutcomeData: Data?
+    var sacdOutcomeData: Data?
 
     init(detected: DetectedAlbum, issues: [ScanIssue] = []) {
         path = detected.id
@@ -102,6 +104,12 @@ final class AlbumRecord {
     var splitOutcome: SplitOutcome? {
         get { splitOutcomeData.flatMap { try? JSONDecoder().decode(SplitOutcome.self, from: $0) } }
         set { splitOutcomeData = newValue.flatMap { try? JSONEncoder().encode($0) }; updatedAt = Date() }
+    }
+
+    // One outcome per extracted area (stereo, multichannel).
+    var sacdOutcomes: [SACDExtractOutcome] {
+        get { sacdOutcomeData.flatMap { try? JSONDecoder().decode([SACDExtractOutcome].self, from: $0) } ?? [] }
+        set { sacdOutcomeData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue); updatedAt = Date() }
     }
 
     var subtitle: String {

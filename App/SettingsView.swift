@@ -1,3 +1,4 @@
+import SACDKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -42,6 +43,10 @@ struct GeneralSettingsView: View {
             }
             Section("SACD") {
                 Toggle("Also extract the multichannel area when present", isOn: $settings.extractMultichannel)
+                Picker("Audio between tracks", selection: $settings.sacdPausePolicy) {
+                    Text("Keep at the end of the previous track").tag(SACDExtractOptions.PausePolicy.appendToPrevious)
+                    Text("Drop (sacd_extract behaviour)").tag(SACDExtractOptions.PausePolicy.drop)
+                }
             }
             Section("Artwork") {
                 Picker("Embedded cover size", selection: $settings.embedCoverMaxPixels) {

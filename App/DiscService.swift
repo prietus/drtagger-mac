@@ -3,6 +3,7 @@ import Foundation
 import LibraryKit
 import Observation
 import ProviderKit
+import SACDKit
 import SplitKit
 import SwiftData
 
@@ -140,6 +141,45 @@ final class DiscService {
             if outcome.ctdbTrackCRC32s != nil {
                 await checkCUEToolsDB(record, locator: locator)
             }
+        } catch {
+            record.state = .error
+            record.errorMessage = error.localizedDescription
+            end(record, error: error)
+        }
+    }
+
+    // MARK: SACD
+
+    // Extracts the stereo area (and the multichannel one when asked) of a
+    // SACD image into DSF files under the destination root.
+    func extractSACD(_ record: AlbumRecord, into destination: URL, multichannel: Bool, options: SACDExtractOptions = SACDExtractOptions()) async {
+        guard record.kind == .sacdISO else { return }
+        begin(record, String(localized: "Reading disc…"), fraction: 0)
+        record.state = .applying
+        let path = record.path
+        let url = record.url
+        do {
+            let disc = try await Task.detached(priority: .userInitiated) { try SACDDiscReader.read(url: url) }.value
+            var areas: [SACDArea] = []
+            if let stereo = disc.stereoArea { areas.append(stereo) }
+            if multichannel, let mc = disc.multichannelArea { areas.append(mc) }
+            var outcomes: [SACDExtractOutcome] = []
+            for area in areas {
+                let label = area.displayName
+                let outcome = try await Task.detached(priority: .userInitiated) { [weak self] in
+                    try SACDExtractor().extract(disc: disc, area: area, destinationRoot: destination, options: options) { p in
+                        Task { @MainActor in
+                            self?.activity[path] = Activity(message: "\(label): \(p.message)", fraction: p.fraction)
+                        }
+                    }
+                }.value
+                outcomes.append(outcome)
+            }
+            record.sacdOutcomes = outcomes
+            let ok = outcomes.allSatisfy(\.verified)
+            record.state = ok ? .scanned : .error
+            record.errorMessage = ok ? nil : outcomes.flatMap(\.warnings).joined(separator: "\n")
+            end(record)
         } catch {
             record.state = .error
             record.errorMessage = error.localizedDescription
