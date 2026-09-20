@@ -1,0 +1,106 @@
+# XcodeGen spec. Regenerate the project after editing with:
+#   xcodegen generate
+# The generated drtagger.xcodeproj is git-ignored.
+name: drtagger
+options:
+  bundleIdPrefix: us.priet
+  deploymentTarget:
+    macOS: "15.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+  xcodeVersion: "27.0"
+  generateEmptyDirectories: true
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    MACOSX_DEPLOYMENT_TARGET: "15.0"
+    ENABLE_HARDENED_RUNTIME: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    # Local builds sign ad hoc. For distribution set your team and a
+    # "Developer ID Application" identity in Xcode (Signing & Capabilities).
+    CODE_SIGN_STYLE: Automatic
+    CODE_SIGN_IDENTITY: "-"
+    SWIFT_EMIT_LOC_STRINGS: YES
+    DEAD_CODE_STRIPPING: YES
+
+packages:
+  FLACKit:
+    path: Packages/FLACKit
+  Chromaprint:
+    path: Packages/Chromaprint
+  ProviderKit:
+    path: Packages/ProviderKit
+
+targets:
+  drtagger:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+        excludes:
+          - "**/.DS_Store"
+    dependencies:
+      - package: FLACKit
+        product: FLACKit
+      - package: Chromaprint
+        product: ChromaprintKit
+      - package: ProviderKit
+        product: ProviderKit
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleName: drtagger
+        CFBundleDisplayName: drtagger
+        LSMinimumSystemVersion: "15.0"
+        LSApplicationCategoryType: public.app-category.music
+        NSHumanReadableCopyright: "Copyright © 2026. All rights reserved."
+        NSPrincipalClass: NSApplication
+        NSSupportsAutomaticTermination: false
+        NSSupportsSuddenTermination: false
+    entitlements:
+      path: App/drtagger.entitlements
+      properties: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: us.priet.drtagger-mac
+        PRODUCT_NAME: drtagger
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_PREVIEWS: YES
+    postBuildScripts:
+      - name: Embed ffmpeg
+        script: '"$SRCROOT/scripts/embed-ffmpeg.sh"'
+        basedOnDependencyAnalysis: false
+
+  drtaggerTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/DrtaggerTests
+    dependencies:
+      - target: drtagger
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: us.priet.drtagger-mac.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  drtagger:
+    build:
+      targets:
+        drtagger: all
+        drtaggerTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - drtaggerTests
+    profile:
+      config: Release
+    archive:
+      config: Release
