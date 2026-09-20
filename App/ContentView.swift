@@ -1,9 +1,12 @@
 import LibraryKit
+import SplitKit
 import SwiftData
 import SwiftUI
 
 struct ContentView: View {
     @Environment(LibraryController.self) private var library
+    @Environment(DiscService.self) private var disc
+    @Environment(AppSettings.self) private var settings
 
     var body: some View {
         @Bindable var library = library
@@ -56,6 +59,21 @@ struct ContentView: View {
         .navigationTitle("drtagger")
         .task {
             await library.importLaunchArguments()
+            await splitFromLaunchArguments()
+        }
+    }
+}
+
+extension ContentView {
+    // `--split-into <folder>` splits every CUE-based album in the store after
+    // the launch scan. Used to exercise the whole pipeline from scripts.
+    func splitFromLaunchArguments(_ arguments: [String] = CommandLine.arguments) async {
+        guard let index = arguments.firstIndex(of: "--split-into"), index + 1 < arguments.count else { return }
+        let destination = URL(fileURLWithPath: NSString(string: arguments[index + 1]).expandingTildeInPath, isDirectory: true)
+        for record in library.allRecords() where record.isSplittable {
+            var options = SplitOptions()
+            options.overwriteExisting = true
+            await disc.split(record, into: destination, locator: settings.ffmpegLocator, options: options)
         }
     }
 }

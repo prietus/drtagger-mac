@@ -12,7 +12,8 @@ Scope, decisions and delivery phases live in [DESIGN.md](DESIGN.md).
 | `Packages/FLACKit` | FLAC / DSF / WAV readers and writers, ID3v2, Vorbis comments |
 | `Packages/Chromaprint` | Vendored chromaprint 1.5.1 (LGPL) + `ChromaprintKit` Swift wrapper |
 | `Packages/ProviderKit` | MusicBrainz, AcoustID, Discogs clients and the `Candidate` model |
-| `Packages/LibraryKit` | Album discovery: folder scanner, CUE parser with encoding detection, SACD probe |
+| `Packages/LibraryKit` | Album discovery: folder scanner, CUE parser with encoding detection, SACD probe, disc TOC / IDs, split plan |
+| `Packages/SplitKit` | ffmpeg driver, verified CUE image splitting to FLAC, CUETools DB CRCs, path templates |
 | `Vendor/ffmpeg` | Minimal LGPL ffmpeg/ffprobe embedded in the app (built, not committed) |
 | `scripts/build-ffmpeg.sh` | Reproducible ffmpeg build (arm64 + x86_64) |
 | `scripts/embed-ffmpeg.sh` | Xcode run-script phase that copies and signs the helpers |
@@ -40,7 +41,13 @@ To load a library at launch without the open panel:
 
 ```sh
 open .build/DerivedData/Build/Products/Debug/drtagger.app --args --add ~/mactagger-samples
+# …and split every CUE-based album it found into a folder:
+open .build/DerivedData/Build/Products/Debug/drtagger.app --args --add ~/rips --split-into ~/Music/Library
 ```
+
+Slow and network tests are opt-in: `DRTAGGER_SLOW_TESTS=1 swift test` in
+`Packages/SplitKit` splits a real rip; `DRTAGGER_NETWORK_TESTS=1 swift test`
+in `Packages/ProviderKit` queries CUETools DB.
 
 Without `Vendor/ffmpeg` the app still builds and falls back to a Homebrew
 ffmpeg for development (Settings > Advanced shows which one is in use).

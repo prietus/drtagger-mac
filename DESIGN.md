@@ -114,6 +114,9 @@ is not replaced without asking. Size and format are settings.
 - ReplayGain / EBU R128 per track and album via ffmpeg `ebur128`, written as
   REPLAYGAIN_* (PCM) and R128_* (DSF).
 - CD rip verification against **CUETools DB** (TOC + per-track CRC, no key).
+  CTDB CRCs are plain CRC32 of 16-bit PCM with the first 5880 samples after
+  track 1's INDEX 01 and the last 5880 samples of the disc excluded
+  (established empirically on 2026-09-20; matches CUETools' "stride").
 - Not in scope for now: DR meter, lyrics, genre/mood providers, reorganising
   already-tagged loose albums.
 
@@ -144,8 +147,11 @@ blocks. Audio is never rewritten; stream MD5 is verified after each write.
   ID3v2 in WAV/AIFF, AIFF reader, DFF reader.
 - `ChromaprintKit` — vendored chromaprint 1.5.1 (vDSP backend, LGPL 2.1).
 - `DrtaggerNetwork` — MusicBrainz, AcoustID, Discogs clients and `Candidate`.
-  To add: Cover Art Archive, fanart.tv, iTunes Search, Deezer, CUETools DB,
-  rate limiting per provider, on-disk response cache. WebDAV code dropped.
+  Added: `CUEToolsDBClient` (TOC lookup, XML parsing, CRC verification; CTDB
+  also returns MusicBrainz release candidates for the TOC, an extra
+  identification signal). To add: Cover Art Archive, fanart.tv, iTunes
+  Search, Deezer, rate limiting per provider, on-disk response cache.
+  WebDAV code dropped.
 
 ### New modules
 - `LibraryKit` (phase 1, done) — album discovery. `LibraryScanner` walks
@@ -156,6 +162,10 @@ blocks. Audio is never rewritten; stream MD5 is verified after each write.
   double-byte runs, CP1251 by Cyrillic words, else CP1252/Latin-1) and
   exposes barcode / catalog / DiscID hints from CATALOG and REM lines.
   `SACDProbe` reads the Scarletbook master TOC, master text and area TOCs.
+  `DiscTOC` rebuilds the CD TOC from a CUE plus file lengths and yields the
+  MusicBrainz Disc ID, FreeDB ID (checked against real REM DISCIDs) and the
+  CUETools DB TOC string; `CueSplitPlan` gives sample-accurate track ranges
+  (gaps appended to the previous track, HTOA as track 00 above a threshold).
 - `ImageKit` — Scarletbook (SACD ISO) reader: master TOC, area TOCs, disc
   text, track list, DSD/DST frame extraction, DSF writer. Written from the
   Scarletbook specification, no GPL code. Layout verified against 205 real
@@ -167,9 +177,16 @@ blocks. Audio is never rewritten; stream MD5 is verified after each write.
   wrong, hence a fallback signal only. sacd_extract XML sidecars next to
   the ISOs serve as ground truth for parser tests. CUE parser with encoding sniffing,
   TOC → MusicBrainz DiscID, CTDB TOC id.
-- `Transcoder` — wraps the bundled `ffmpeg` (Process, stdin/stdout pipes):
-  decode any input to PCM for fingerprinting, split image ranges to FLAC,
-  run `ebur128` / `replaygain`.
+- `SplitKit` (phase 2, done) — `FFmpegTool` drives the bundled ffmpeg
+  (ffprobe JSON, decode to raw PCM, FLAC encode from a stdin pipe with a
+  running MD5/CRC of the bytes fed). `ImageSplitter` decodes the image (or
+  the run of per-track files) once, cuts sample-accurate ranges from
+  `CueSplitPlan`, verifies every track's STREAMINFO MD5 against the fed
+  PCM (falls back to a decode + CRC compare), writes provisional Vorbis
+  tags from the CUE, and computes CUETools DB CRCs. `PathTemplate` renders
+  `{albumartist}/{album} ({year})/{track} {title}` safely. Verified on a
+  real XRCD rip: all five track CRCs and the disc CRC equal the CTDB entry.
+  ReplayGain / `ebur128` still to come (phase 6).
 - `DSTKit` — DST (Direct Stream Transfer) decoder that outputs the DSD
   bitstream. Verified on 2026-09-20: ffmpeg's `dst` decoder always runs its
   DSD→PCM filter and emits float PCM, so it cannot produce lossless DSF from
@@ -202,6 +219,7 @@ Responses cached on disk keyed by URL with provider-specific TTLs.
 1. Library scan and album detection (ISO / image+CUE / track folder), queue
    with states, SwiftData store. **Done 2026-09-20.**
 2. CUE parsing, image splitting with verification, DiscID, CTDB check.
+   **Done 2026-09-20** (inspector "Disc" section, `--split-into <folder>`).
 3. SACD ISO reader, DSF extraction, DST via ffmpeg, disc text.
 4. Identification pipeline: artwork barcode/OCR, DiscID, tags, fingerprints,
    voting, confidence; providers MB / Discogs / CAA / fanart / iTunes / Deezer.

@@ -16,6 +16,9 @@ struct AlbumInspectorView: View {
                 header
                 if let detected {
                     overview(detected)
+                    if record.isSplittable {
+                        DiscIdentityView(record: record)
+                    }
                     if let sacd = detected.sacd {
                         sacdSection(sacd)
                     }

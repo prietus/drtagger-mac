@@ -34,6 +34,8 @@ packages:
     path: Packages/ProviderKit
   LibraryKit:
     path: Packages/LibraryKit
+  SplitKit:
+    path: Packages/SplitKit
 
 targets:
   drtagger:
@@ -52,6 +54,8 @@ targets:
         product: ProviderKit
       - package: LibraryKit
         product: LibraryKit
+      - package: SplitKit
+        product: SplitKit
     info:
       path: App/Info.plist
       properties:
@@ -63,6 +67,14 @@ targets:
         NSPrincipalClass: NSApplication
         NSSupportsAutomaticTermination: false
         NSSupportsSuddenTermination: false
+        # CUETools DB only speaks plain HTTP (no TLS on db.cuetools.net /
+        # p.cuetools.net, checked 2026-09-20). It serves public checksums, so
+        # an ATS exception for that domain is acceptable.
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            cuetools.net:
+              NSIncludesSubdomains: true
+              NSExceptionAllowsInsecureHTTPLoads: true
     entitlements:
       path: App/drtagger.entitlements
       properties: {}

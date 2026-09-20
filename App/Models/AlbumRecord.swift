@@ -1,5 +1,7 @@
 import Foundation
 import LibraryKit
+import ProviderKit
+import SplitKit
 import SwiftData
 
 // One album in the queue, persisted across launches. The scanner's full
@@ -24,6 +26,11 @@ final class AlbumRecord {
     var errorMessage: String?
     var addedAt: Date
     var updatedAt: Date
+    // Phase 2: disc identity and split results (JSON, optional so older
+    // stores migrate automatically).
+    var tocData: Data?
+    var ctdbData: Data?
+    var splitOutcomeData: Data?
 
     init(detected: DetectedAlbum, issues: [ScanIssue] = []) {
         path = detected.id
@@ -80,6 +87,23 @@ final class AlbumRecord {
         formatsRaw.split(separator: ",").compactMap { AudioFormat(rawValue: String($0)) }
     }
 
+    var isSplittable: Bool { kind == .cueImage || kind == .cueMultiFile }
+
+    var toc: DiscTOC? {
+        get { tocData.flatMap { try? JSONDecoder().decode(DiscTOC.self, from: $0) } }
+        set { tocData = newValue.flatMap { try? JSONEncoder().encode($0) }; updatedAt = Date() }
+    }
+
+    var ctdbReport: CTDBReport? {
+        get { ctdbData.flatMap { try? JSONDecoder().decode(CTDBReport.self, from: $0) } }
+        set { ctdbData = newValue.flatMap { try? JSONEncoder().encode($0) }; updatedAt = Date() }
+    }
+
+    var splitOutcome: SplitOutcome? {
+        get { splitOutcomeData.flatMap { try? JSONDecoder().decode(SplitOutcome.self, from: $0) } }
+        set { splitOutcomeData = newValue.flatMap { try? JSONEncoder().encode($0) }; updatedAt = Date() }
+    }
+
     var subtitle: String {
         var parts: [String] = [kind.displayName]
         if trackCount > 0 {
@@ -96,4 +120,18 @@ final class AlbumRecord {
         }
         return parts.joined(separator: " · ")
     }
+}
+
+// What we keep from a CUETools DB lookup: the entries' confidence, the
+// MusicBrainz / FreeDB candidates it lists for the TOC, and, once the disc
+// has been split, how our CRCs compared.
+struct CTDBReport: Codable, Equatable, Sendable {
+    var checkedAt: Date
+    var entryCount: Int
+    var totalConfidence: Int
+    var bestConfidence: Int
+    var metadata: [CUEToolsDBClient.Metadata]
+    var verification: CUEToolsDBClient.Verification?
+
+    var isKnownDisc: Bool { entryCount > 0 }
 }

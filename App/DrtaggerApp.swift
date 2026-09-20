@@ -6,6 +6,7 @@ struct DrtaggerApp: App {
     private let container: ModelContainer
     @State private var settings = AppSettings()
     @State private var library: LibraryController
+    @State private var disc = DiscService()
 
     init() {
         let container = Self.makeContainer()
@@ -18,6 +19,7 @@ struct DrtaggerApp: App {
             ContentView()
                 .environment(settings)
                 .environment(library)
+                .environment(disc)
         }
         .modelContainer(container)
         .defaultSize(width: 1180, height: 760)
