@@ -5,6 +5,7 @@ import ProviderKit
 import SACDKit
 import SplitKit
 import SwiftData
+import TagKit
 
 // One album in the queue, persisted across launches. The scanner's full
 // DetectedAlbum is kept as JSON so the inspector can show discs, tracks,
@@ -37,6 +38,13 @@ final class AlbumRecord {
     // Phase 4: identification result and the user's pick.
     var identificationData: Data?
     var selectedCandidateID: String?
+    // Phase 5: tag locks, the original metadata of every written file, the
+    // write reports and the artwork choice.
+    var tagLocksData: Data?
+    var tagBackupsData: Data?
+    var tagReportsData: Data?
+    var taggedAt: Date?
+    var coverOptionID: String?
 
     init(detected: DetectedAlbum, issues: [ScanIssue] = []) {
         path = detected.id
@@ -118,6 +126,22 @@ final class AlbumRecord {
     var selectedCandidate: ScoredCandidate? {
         guard let id = selectedCandidateID else { return nil }
         return identification?.candidates.first { $0.id == id }
+    }
+
+    var tagLocks: Set<String> {
+        get { tagLocksData.flatMap { try? JSONDecoder().decode(Set<String>.self, from: $0) } ?? [] }
+        set { tagLocksData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue); updatedAt = Date() }
+    }
+
+    // Original metadata of every file written by Apply; kept until Restore.
+    var tagBackups: [TagBackup] {
+        get { tagBackupsData.flatMap { try? JSONDecoder().decode([TagBackup].self, from: $0) } ?? [] }
+        set { tagBackupsData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue); updatedAt = Date() }
+    }
+
+    var tagReports: [TagWriteReport] {
+        get { tagReportsData.flatMap { try? JSONDecoder().decode([TagWriteReport].self, from: $0) } ?? [] }
+        set { tagReportsData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue); updatedAt = Date() }
     }
 
     // One outcome per extracted area (stereo, multichannel).

@@ -8,6 +8,7 @@ struct DrtaggerApp: App {
     @State private var library: LibraryController
     @State private var disc = DiscService()
     @State private var identify = IdentifyService()
+    @State private var tagging = TagService()
 
     init() {
         let container = Self.makeContainer()
@@ -26,6 +27,7 @@ struct DrtaggerApp: App {
                 .environment(library)
                 .environment(disc)
                 .environment(identify)
+                .environment(tagging)
         }
         .modelContainer(container)
         .defaultSize(width: 1180, height: 760)

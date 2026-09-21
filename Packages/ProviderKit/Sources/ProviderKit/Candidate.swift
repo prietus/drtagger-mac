@@ -5,6 +5,41 @@ import Foundation
 // identification scorer don't have to know which service a candidate came
 // from. Codable so identification results persist with the album.
 
+// One name in an artist credit, as MusicBrainz models it: "Ella Fitzgerald"
+// + " & " + "Oscar Peterson". Sort names and MBIDs feed the *SORT and
+// MUSICBRAINZ_*ARTISTID tags.
+public struct ArtistCredit: Sendable, Equatable, Codable, Hashable {
+    public let name: String
+    public let joinPhrase: String
+    public let artistID: String?
+    public let sortName: String?
+
+    public init(name: String, joinPhrase: String = "", artistID: String? = nil, sortName: String? = nil) {
+        self.name = name
+        self.joinPhrase = joinPhrase
+        self.artistID = artistID
+        self.sortName = sortName
+    }
+
+    public static func joined(_ credits: [ArtistCredit]) -> String {
+        credits.map { $0.name + $0.joinPhrase }.joined()
+    }
+
+    public static func sortJoined(_ credits: [ArtistCredit]) -> String {
+        credits.map { ($0.sortName ?? $0.name) + $0.joinPhrase }.joined()
+    }
+}
+
+public struct WorkCredit: Sendable, Equatable, Codable, Hashable {
+    public let id: String?
+    public let title: String
+
+    public init(id: String?, title: String) {
+        self.id = id
+        self.title = title
+    }
+}
+
 public struct Candidate: Sendable, Identifiable, Equatable, Codable, Hashable {
     public enum Source: String, Sendable, Equatable, Codable {
         case musicbrainz
@@ -42,7 +77,15 @@ public struct Candidate: Sendable, Identifiable, Equatable, Codable, Hashable {
     public let status: String?               // "Official", "Bootleg", …
     public let primaryType: String?          // "Album", "Single", …
 
+    // Tagging fields (phase 5).
+    public let artistCredits: [ArtistCredit] // release artist credit with MBIDs and sort names
+    public let secondaryTypes: [String]      // "Live", "Compilation", …
+    public let firstReleaseDate: String?     // release group's first release: ORIGINALDATE
+    public let script: String?               // "Latn", "Jpan", …
+
     public var id: String { source.rawValue + ":" + providerID }
+    public var artistSort: String? { artistCredits.isEmpty ? nil : ArtistCredit.sortJoined(artistCredits) }
+    public var artistIDs: [String] { artistCredits.compactMap(\.artistID) }
 
     public init(
         source: Source,
@@ -66,7 +109,11 @@ public struct Candidate: Sendable, Identifiable, Equatable, Codable, Hashable {
         barcode: String? = nil,
         media: [CandidateMedium] = [],
         status: String? = nil,
-        primaryType: String? = nil
+        primaryType: String? = nil,
+        artistCredits: [ArtistCredit] = [],
+        secondaryTypes: [String] = [],
+        firstReleaseDate: String? = nil,
+        script: String? = nil
     ) {
         self.source = source
         self.providerID = providerID
@@ -90,6 +137,41 @@ public struct Candidate: Sendable, Identifiable, Equatable, Codable, Hashable {
         self.media = media
         self.status = status
         self.primaryType = primaryType
+        self.artistCredits = artistCredits
+        self.secondaryTypes = secondaryTypes
+        self.firstReleaseDate = firstReleaseDate
+        self.script = script
+    }
+
+    // Results saved before a field existed decode with its default.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        source = try c.decode(Source.self, forKey: .source)
+        providerID = try c.decode(String.self, forKey: .providerID)
+        releaseGroupID = try c.decodeIfPresent(String.self, forKey: .releaseGroupID)
+        title = try c.decode(String.self, forKey: .title)
+        artist = try c.decode(String.self, forKey: .artist)
+        year = try c.decodeIfPresent(String.self, forKey: .year)
+        country = try c.decodeIfPresent(String.self, forKey: .country)
+        label = try c.decodeIfPresent(String.self, forKey: .label)
+        catalogNumber = try c.decodeIfPresent(String.self, forKey: .catalogNumber)
+        mediaFormat = try c.decodeIfPresent(String.self, forKey: .mediaFormat)
+        trackCount = try c.decodeIfPresent(Int.self, forKey: .trackCount)
+        disambiguation = try c.decodeIfPresent(String.self, forKey: .disambiguation)
+        coverArtURL = try c.decodeIfPresent(URL.self, forKey: .coverArtURL)
+        tracks = try c.decodeIfPresent([CandidateTrack].self, forKey: .tracks) ?? []
+        releasedDate = try c.decodeIfPresent(String.self, forKey: .releasedDate)
+        genres = try c.decodeIfPresent([String].self, forKey: .genres) ?? []
+        styles = try c.decodeIfPresent([String].self, forKey: .styles) ?? []
+        formatDescriptions = try c.decodeIfPresent([String].self, forKey: .formatDescriptions) ?? []
+        barcode = try c.decodeIfPresent(String.self, forKey: .barcode)
+        media = try c.decodeIfPresent([CandidateMedium].self, forKey: .media) ?? []
+        status = try c.decodeIfPresent(String.self, forKey: .status)
+        primaryType = try c.decodeIfPresent(String.self, forKey: .primaryType)
+        artistCredits = try c.decodeIfPresent([ArtistCredit].self, forKey: .artistCredits) ?? []
+        secondaryTypes = try c.decodeIfPresent([String].self, forKey: .secondaryTypes) ?? []
+        firstReleaseDate = try c.decodeIfPresent(String.self, forKey: .firstReleaseDate)
+        script = try c.decodeIfPresent(String.self, forKey: .script)
     }
 
     // Tracks of every medium in order; falls back to `tracks`.
@@ -150,6 +232,9 @@ public struct CandidateTrack: Sendable, Equatable, Codable, Hashable {
     public let credits: [TrackCredit]   // per-track credits (composers, sidemen, etc.)
     public let recordingID: String?     // MB recording MBID
     public let trackID: String?         // MB track MBID (release-specific)
+    public let artistCredits: [ArtistCredit]  // track artist credit (empty = same as release)
+    public let isrcs: [String]
+    public let works: [WorkCredit]
 
     public init(
         position: Int,
@@ -158,7 +243,10 @@ public struct CandidateTrack: Sendable, Equatable, Codable, Hashable {
         durationMS: Int? = nil,
         credits: [TrackCredit] = [],
         recordingID: String? = nil,
-        trackID: String? = nil
+        trackID: String? = nil,
+        artistCredits: [ArtistCredit] = [],
+        isrcs: [String] = [],
+        works: [WorkCredit] = []
     ) {
         self.position = position
         self.title = title
@@ -167,6 +255,23 @@ public struct CandidateTrack: Sendable, Equatable, Codable, Hashable {
         self.credits = credits
         self.recordingID = recordingID
         self.trackID = trackID
+        self.artistCredits = artistCredits
+        self.isrcs = isrcs
+        self.works = works
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        position = try c.decode(Int.self, forKey: .position)
+        title = try c.decode(String.self, forKey: .title)
+        artist = try c.decodeIfPresent(String.self, forKey: .artist)
+        durationMS = try c.decodeIfPresent(Int.self, forKey: .durationMS)
+        credits = try c.decodeIfPresent([TrackCredit].self, forKey: .credits) ?? []
+        recordingID = try c.decodeIfPresent(String.self, forKey: .recordingID)
+        trackID = try c.decodeIfPresent(String.self, forKey: .trackID)
+        artistCredits = try c.decodeIfPresent([ArtistCredit].self, forKey: .artistCredits) ?? []
+        isrcs = try c.decodeIfPresent([String].self, forKey: .isrcs) ?? []
+        works = try c.decodeIfPresent([WorkCredit].self, forKey: .works) ?? []
     }
 }
 

@@ -268,7 +268,7 @@ public enum ID3v2Bridge {
 
     // Decode a TXXX payload into (description, value).
     // Layout: encoding(1) + description(textZ) + value(text)
-    private static func decodeTXXX(_ payload: Data) -> (description: String, value: String)? {
+    public static func decodeTXXX(_ payload: Data) -> (description: String, value: String)? {
         guard let encoding = payload.first else { return nil }
         let body = payload.dropFirst()
         let split = splitNullTerminated(body, encoding: encoding)
@@ -277,7 +277,7 @@ public enum ID3v2Bridge {
     }
 
     // Decode a COMM frame: encoding(1) + lang(3) + descZ + text
-    private static func decodeCOMM(_ payload: Data) -> String? {
+    public static func decodeCOMM(_ payload: Data) -> String? {
         guard payload.count >= 4 else { return nil }
         let encoding = payload[payload.startIndex]
         let body = payload.dropFirst(4) // skip encoding + 3-byte language
@@ -286,7 +286,7 @@ public enum ID3v2Bridge {
     }
 
     // Decode a generic text frame: encoding(1) + text(... maybe null-separated)
-    private static func decodeTextFrame(_ payload: Data) -> [String] {
+    public static func decodeTextFrame(_ payload: Data) -> [String] {
         guard let encoding = payload.first else { return [] }
         let body = payload.dropFirst()
         let raw = decodeText(Data(body), encoding: encoding)
@@ -297,7 +297,7 @@ public enum ID3v2Bridge {
             .map(String.init)
     }
 
-    private static func decodeText(_ data: Data, encoding: UInt8) -> String {
+    public static func decodeText(_ data: Data, encoding: UInt8) -> String {
         switch encoding {
         case 0:
             return String(data: data, encoding: .isoLatin1) ?? ""
@@ -315,7 +315,7 @@ public enum ID3v2Bridge {
 
     // Splits a payload (after the encoding byte was already consumed)
     // into pieces separated by the encoding's NULL terminator.
-    private static func splitNullTerminated(_ data: Data, encoding: UInt8) -> [String] {
+    public static func splitNullTerminated(_ data: Data, encoding: UInt8) -> [String] {
         if encoding == 1 || encoding == 2 {
             // UTF-16: NULL is two zero bytes; alignment matters.
             var pieces: [Data] = []
@@ -356,13 +356,13 @@ public enum ID3v2Bridge {
 
     // MARK: Frame body builders (v2.3 / UTF-16-LE-with-BOM)
 
-    private static func makeTextFrame(id: String, value: String) -> ID3v2Frame {
+    public static func makeTextFrame(id: String, value: String) -> ID3v2Frame {
         var payload = Data([0x01]) // encoding 1 = UTF-16 with BOM
         payload.append(encodeUTF16WithBOM(value))
         return ID3v2Frame(id: id, payload: payload)
     }
 
-    private static func makeTXXXFrame(description: String, value: String) -> ID3v2Frame {
+    public static func makeTXXXFrame(description: String, value: String) -> ID3v2Frame {
         var payload = Data([0x01])
         payload.append(encodeUTF16WithBOM(description))
         payload.append(contentsOf: [0x00, 0x00]) // UTF-16 NULL
@@ -370,7 +370,7 @@ public enum ID3v2Bridge {
         return ID3v2Frame(id: "TXXX", payload: payload)
     }
 
-    private static func encodeUTF16WithBOM(_ s: String) -> Data {
+    public static func encodeUTF16WithBOM(_ s: String) -> Data {
         var out = Data([0xFF, 0xFE]) // UTF-16-LE BOM
         for unit in s.utf16 {
             out.append(UInt8(unit & 0xff))

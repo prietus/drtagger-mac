@@ -132,15 +132,22 @@ public actor MusicBrainzClient {
         )!
         components.queryItems = [
             URLQueryItem(name: "fmt", value: "json"),
-            URLQueryItem(name: "inc", value: "recordings+artist-credits+labels+media+release-groups+discids"),
+            // Relationships bring performers, producers and (through the
+            // works) composers and lyricists; ISRCs come with the recordings.
+            URLQueryItem(name: "inc", value: "recordings+artist-credits+labels+media+release-groups+discids+isrcs+artist-rels+recording-level-rels+work-rels+work-level-rels"),
         ]
         guard let url = components.url else {
             throw ProviderError.invalidURL
         }
 
         let data = try await sendRateLimited(url: url)
+        return try Self.decodeRelease(data)
+    }
+
+    // Exposed for tests: a release lookup JSON → Candidate.
+    static func decodeRelease(_ data: Data) throws -> Candidate {
         let release = try JSONDecoder().decode(MBRelease.self, from: data)
-        return Self.toCandidate(release, disambiguationFallback: nil)
+        return toCandidate(release, disambiguationFallback: nil)
     }
 
     // Browse every release in a release-group. Used to expand a single
@@ -237,11 +244,60 @@ public actor MusicBrainzClient {
 
     // MARK: JSON → Candidate mapping
 
+    private static func credits(_ raw: [MBArtistCredit]?) -> [ArtistCredit] {
+        (raw ?? []).compactMap { c in
+            let name = c.name ?? c.artist?.name ?? ""
+            guard !name.isEmpty else { return nil }
+            return ArtistCredit(name: name, joinPhrase: c.joinphrase ?? "", artistID: c.artist?.id, sortName: c.artist?.sortName)
+        }
+    }
+
+    // Recording and work relationships → role/name credits. Instruments and
+    // vocals keep their attribute ("guitar", "lead vocals") as the role.
+    private static func trackCredits(_ recording: MBRecording?) -> (credits: [TrackCredit], works: [WorkCredit]) {
+        var credits: [TrackCredit] = []
+        var works: [WorkCredit] = []
+        var seen = Set<String>()
+        func add(_ role: String, _ name: String?) {
+            guard let name, !name.isEmpty else { return }
+            let key = role.lowercased() + "|" + name
+            if seen.insert(key).inserted { credits.append(TrackCredit(role: role, name: name)) }
+        }
+        for rel in recording?.relations ?? [] {
+            let type = rel.type?.lowercased() ?? ""
+            if rel.targetType == "work", let work = rel.work {
+                if type == "performance" {
+                    works.append(WorkCredit(id: work.id, title: work.title ?? ""))
+                }
+                for wrel in work.relations ?? [] where wrel.targetType == "artist" {
+                    let wtype = wrel.type?.lowercased() ?? ""
+                    switch wtype {
+                    case "composer", "lyricist", "librettist", "writer", "arranger", "orchestrator", "translator":
+                        add(wtype, wrel.artist?.name)
+                    default: break
+                    }
+                }
+                continue
+            }
+            guard rel.targetType == "artist" else { continue }
+            let attrs = (rel.attributes ?? []).filter { $0 != "additional" && $0 != "guest" && $0 != "solo" }
+            switch type {
+            case "instrument": add(attrs.isEmpty ? "performer" : attrs.joined(separator: ", "), rel.artist?.name)
+            case "vocal": add(attrs.isEmpty ? "vocals" : attrs.joined(separator: ", "), rel.artist?.name)
+            case "performer", "performing orchestra", "orchestra", "conductor", "arranger", "producer", "engineer",
+                 "mix", "recording", "mastering", "remixer", "programming", "chorus master", "concertmaster":
+                add(type == "mix" ? "mixer" : type == "recording" ? "recording engineer" : type, rel.artist?.name)
+            default: break
+            }
+        }
+        return (credits, works)
+    }
+
     private static func toCandidate(_ release: MBRelease, disambiguationFallback: String?) -> Candidate {
-        let artist = release.artistCredit?
-            .map { $0.name ?? $0.artist?.name ?? "" }
-            .filter { !$0.isEmpty }
-            .joined(separator: ", ") ?? ""
+        let artistCredits = credits(release.artistCredit)
+        let artist = artistCredits.isEmpty
+            ? (release.artistCredit ?? []).map { $0.name ?? $0.artist?.name ?? "" }.filter { !$0.isEmpty }.joined(separator: ", ")
+            : ArtistCredit.joined(artistCredits)
 
         let year: String? = {
             guard let date = release.date, !date.isEmpty else { return nil }
@@ -268,14 +324,20 @@ public actor MusicBrainzClient {
 
         let mediaList: [CandidateMedium] = (release.media ?? []).enumerated().map { mIdx, m in
             let tracks: [CandidateTrack] = (m.tracks ?? []).enumerated().map { idx, t in
-                let credit = t.artistCredit?.map { $0.name ?? $0.artist?.name ?? "" }.filter { !$0.isEmpty }.joined(separator: ", ")
+                let trackCredit = credits(t.artistCredit)
+                let credit = trackCredit.isEmpty ? nil : ArtistCredit.joined(trackCredit)
+                let extra = trackCredits(t.recording)
                 return CandidateTrack(
                     position: Int(t.number ?? "\(idx + 1)") ?? (t.position ?? idx + 1),
                     title: t.title ?? t.recording?.title ?? "",
                     artist: (credit?.isEmpty == false && credit != artist) ? credit : nil,
                     durationMS: t.length ?? t.recording?.length,
+                    credits: extra.credits,
                     recordingID: t.recording?.id,
-                    trackID: t.id
+                    trackID: t.id,
+                    artistCredits: trackCredit == artistCredits ? [] : trackCredit,
+                    isrcs: t.recording?.isrcs ?? [],
+                    works: extra.works
                 )
             }
             return CandidateMedium(
@@ -326,7 +388,11 @@ public actor MusicBrainzClient {
             barcode: release.barcode.flatMap { $0.isEmpty ? nil : $0 },
             media: mediaList,
             status: release.status,
-            primaryType: release.releaseGroup?.primaryType
+            primaryType: release.releaseGroup?.primaryType,
+            artistCredits: artistCredits,
+            secondaryTypes: release.releaseGroup?.secondaryTypes ?? [],
+            firstReleaseDate: release.releaseGroup?.firstReleaseDate.flatMap { $0.isEmpty ? nil : $0 },
+            script: release.textRepresentation?.script
         )
     }
 }
@@ -358,6 +424,7 @@ private struct MBRelease: Decodable {
     let labelInfo: [MBLabelInfo]?
     let media: [MBMedium]?
     let releaseGroup: MBReleaseGroup?
+    let textRepresentation: MBTextRepresentation?
 
     // Populated manually when we already know the group ID from the
     // browse query; otherwise derived from the `release-group` key that
@@ -371,25 +438,61 @@ private struct MBRelease: Decodable {
         case labelInfo = "label-info"
         case media
         case releaseGroup = "release-group"
+        case textRepresentation = "text-representation"
     }
+}
+
+private struct MBTextRepresentation: Decodable {
+    let script: String?
+    let language: String?
 }
 
 private struct MBReleaseGroup: Decodable {
     let id: String
     let primaryType: String?
+    let secondaryTypes: [String]?
+    let firstReleaseDate: String?
     enum CodingKeys: String, CodingKey {
         case id
         case primaryType = "primary-type"
+        case secondaryTypes = "secondary-types"
+        case firstReleaseDate = "first-release-date"
     }
 }
 
 private struct MBArtistCredit: Decodable {
     let name: String?
+    let joinphrase: String?
     let artist: MBArtist?
 }
 
 private struct MBArtist: Decodable {
+    let id: String?
     let name: String?
+    let sortName: String?
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case sortName = "sort-name"
+    }
+}
+
+private struct MBRelation: Decodable {
+    let type: String?
+    let direction: String?
+    let targetType: String?
+    let attributes: [String]?
+    let artist: MBArtist?
+    let work: MBWork?
+    enum CodingKeys: String, CodingKey {
+        case type, direction, attributes, artist, work
+        case targetType = "target-type"
+    }
+}
+
+private struct MBWork: Decodable {
+    let id: String?
+    let title: String?
+    let relations: [MBRelation]?
 }
 
 private struct MBLabelInfo: Decodable {
@@ -440,4 +543,6 @@ private struct MBRecording: Decodable {
     let id: String?
     let title: String?
     let length: Int?
+    let isrcs: [String]?
+    let relations: [MBRelation]?
 }

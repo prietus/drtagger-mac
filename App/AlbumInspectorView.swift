@@ -17,6 +17,7 @@ struct AlbumInspectorView: View {
                 if let detected {
                     overview(detected)
                     IdentificationView(record: record)
+                    TagPreviewView(record: record)
                     if record.isSplittable {
                         DiscIdentityView(record: record)
                     }

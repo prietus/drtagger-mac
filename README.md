@@ -16,6 +16,7 @@ Scope, decisions and delivery phases live in [DESIGN.md](DESIGN.md).
 | `Packages/SplitKit` | ffmpeg driver, verified CUE image splitting to FLAC, CUETools DB CRCs, path templates |
 | `Packages/SACDKit` | Scarletbook (SACD ISO) reader, frame reader, DSF writer, per-track extraction with ID3 tags |
 | `Packages/DSTKit` | DST decoder emitting DSD bits (Swift port of FFmpeg's dstdec.c, LGPL) |
+| `Packages/TagKit` | Picard tag schema, mapping from a release, merge with locks, writers for FLAC/DSF/WAV/AIFF/DFF/APE/WV/TTA/ALAC with audio verification, backups and restore, artwork processing |
 | `Packages/IdentifyKit` | Release identification: artwork barcodes/OCR, tags, TOC, fingerprints, candidate scoring |
 | `Vendor/ffmpeg` | Minimal LGPL ffmpeg/ffprobe embedded in the app (built, not committed) |
 | `scripts/build-ffmpeg.sh` | Reproducible ffmpeg build (arm64 + x86_64) |
@@ -50,6 +51,8 @@ open .build/DerivedData/Build/Products/Debug/drtagger.app --args --add ~/rips --
 open .build/DerivedData/Build/Products/Debug/drtagger.app --args --add ~/isos --extract-into ~/Music/Library
 # …or identify everything in the queue (uses the AcoustID / Discogs keys from Settings):
 open .build/DerivedData/Build/Products/Debug/drtagger.app --args --add ~/rips --identify
+# …or identify and write tags + cover to every album with a confident match (originals backed up in the store):
+open .build/DerivedData/Build/Products/Debug/drtagger.app --args --add ~/rips --identify --tag
 ```
 
 Slow and network tests are opt-in: `DRTAGGER_SLOW_TESTS=1 swift test` in

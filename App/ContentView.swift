@@ -9,6 +9,7 @@ struct ContentView: View {
     @Environment(LibraryController.self) private var library
     @Environment(DiscService.self) private var disc
     @Environment(IdentifyService.self) private var identify
+    @Environment(TagService.self) private var tagging
     @Environment(AppSettings.self) private var settings
     @State private var confirmClear = false
 
@@ -86,6 +87,7 @@ struct ContentView: View {
             await splitFromLaunchArguments()
             await extractFromLaunchArguments()
             await identifyFromLaunchArguments()
+            await tagFromLaunchArguments()
         }
     }
 }
@@ -133,6 +135,24 @@ extension ContentView {
                 verdict = identify.error(for: record) ?? "no candidates"
             }
             FileHandle.standardError.write(Data("identify: \(record.displayTitle): \(verdict)\n".utf8))
+        }
+    }
+}
+
+extension ContentView {
+    // `--tag` previews and writes tags for every album with a chosen release.
+    func tagFromLaunchArguments(_ arguments: [String] = CommandLine.arguments) async {
+        guard arguments.contains("--tag") else { return }
+        for record in library.allRecords() {
+            await tagging.buildPlan(record, settings: settings)
+            let verdict: String
+            if tagging.plan(for: record) != nil {
+                await tagging.apply(record, settings: settings)
+                verdict = "\(record.tagReports.count) file(s) written, state \(record.state.rawValue)" + (record.errorMessage.map { " – \($0)" } ?? "")
+            } else {
+                verdict = "no plan: " + (tagging.error(for: record) ?? "unknown")
+            }
+            FileHandle.standardError.write(Data("tag: \(record.displayTitle): \(verdict)\n".utf8))
         }
     }
 }

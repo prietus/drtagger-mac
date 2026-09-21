@@ -61,7 +61,15 @@ struct GeneralSettingsView: View {
                     Text("2000 px").tag(2000)
                     Text("3000 px").tag(3000)
                 }
-                Text("The front cover is embedded resized to this longest side. Full-resolution scans are kept as files next to the tracks.")
+                Toggle("Embed the front cover in every track", isOn: $settings.embedFrontCover)
+                Toggle("Save the full-resolution cover as a file next to the tracks", isOn: $settings.saveCoverFile)
+                Text("The front cover is embedded resized to this longest side. An existing cover file in the folder is never replaced.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Tags") {
+                Toggle("Write GENRE and STYLE from Discogs", isOn: $settings.writeGenresFromDiscogs)
+                Text("Fields taken from the chosen release replace the existing ones; everything else in the files (ReplayGain, comments, custom tags) is preserved. Individual fields can be locked in the preview.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

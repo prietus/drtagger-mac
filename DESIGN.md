@@ -246,7 +246,29 @@ blocks. Audio is never rewritten; stream MD5 is verified after each write.
   kept for the credits merge. Verified live: XRCD image identified from TOC +
   fingerprints in 14 s, a split folder from scans + tags + fingerprints in
   29 s.
-- `TagMap` — Picard schema ↔ container writers, merge with locked fields.
+- `TagKit` (phase 5, done) — the Picard schema as a flat `TagSet`;
+  `PicardMapper` fills it from a candidate (release and track artist credits
+  with MBIDs and sort names, dates and original date, labels and catalog
+  numbers, media, country, status, types, ISRCs, works, performers and
+  production credits from MusicBrainz relationships plus Discogs extra
+  artists, GENRE/STYLE from Discogs, disc IDs); `TagMerge` applies the
+  overwrite policy (candidate fields replace, identity fields the candidate
+  lacks are cleared, everything else preserved, locks win) and yields the
+  per-field diff. Containers: FLAC (VORBIS_COMMENT + PICTURE), DSF (ID3v2.3
+  trailer), WAV/AIFF/DSDIFF (ID3 chunk, one IFF walker with 32/64-bit sizes),
+  APEv2 for APE/WavPack/TTA (stray ID3v1 dropped), MP4/ALAC (ilst rebuilt;
+  a moov in front of mdat becomes a `free` atom and the new moov is
+  appended so chunk offsets never move). ID3 follows Picard's conventions
+  (TXXX descriptions, UFID recording id, IPLS people, TYER+TDAT/TORY dates,
+  NUL-separated multi-values). Every write streams the audio payload to a
+  temp file while hashing it, compares the SHA-256 with the original and
+  only then replaces the file. `TagBackup` keeps the raw metadata region
+  (the whole moov for MP4) so Restore is byte-exact; verified by tests on
+  every container. `ArtworkProcessor` resizes the front cover (JPEG 90 %,
+  small PNGs kept); `CoverArtFetcher` (IdentifyKit) lists sources in order:
+  Cover Art Archive release, release group, Discogs, iTunes, Deezer, folder
+  scans. Not yet: ACOUSTID_ID (the AcoustID client does not surface the
+  result id), fanart.tv, non-Latin transliteration for file names.
 
 ### ffmpeg
 `scripts/build-ffmpeg.sh` builds a minimal LGPL ffmpeg (no `--enable-gpl`,
@@ -276,7 +298,9 @@ Responses cached on disk keyed by URL with provider-specific TTLs.
    **Done 2026-09-21** (fanart.tv client still to add; artwork download and
    embedding belong to phase 5).
 5. Tag mapping and writers for every container, artwork policy, preview with
-   diff and field locks, backups and restore.
+   diff and field locks, backups and restore. **Done 2026-09-21** (inspector
+   "Tags" section: Preview / Apply / Restore Originals, cover picker,
+   album-level and per-track diff with locks; `--tag` launch argument).
 6. ReplayGain, path templates, localisation, signing and notarisation.
 
 ## 5. Sample files

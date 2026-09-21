@@ -286,7 +286,7 @@ public enum MatchScorer {
 
     // Hybrid SACDs (and CD+DVD sets) list one medium per layer; pick the
     // layer matching the local files, otherwise keep every medium.
-    static func relevantMedia(_ candidate: Candidate, localFormat: AlbumSignals.LocalFormat) -> [CandidateMedium] {
+    public static func relevantMedia(_ candidate: Candidate, localFormat: AlbumSignals.LocalFormat) -> [CandidateMedium] {
         let media = candidate.media
         let layers = media.filter { ($0.format ?? "").lowercased().contains("layer") }
         guard !layers.isEmpty else { return media }

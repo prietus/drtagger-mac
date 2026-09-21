@@ -24,6 +24,9 @@ final class AppSettings {
         static let extractMultichannel = "sacd.extractMultichannel"
         static let sacdPausePolicy = "sacd.pausePolicy"
         static let keepQueue = "queue.keepBetweenLaunches"
+        static let embedFrontCover = "artwork.embedFrontCover"
+        static let saveCoverFile = "artwork.saveCoverFile"
+        static let genresFromDiscogs = "tags.genresFromDiscogs"
     }
 
     // Destination library root for split tracks. Empty = not configured.
@@ -57,6 +60,18 @@ final class AppSettings {
     var keepQueueBetweenLaunches: Bool {
         didSet { defaults.set(keepQueueBetweenLaunches, forKey: Key.keepQueue) }
     }
+    // Artwork policy (DESIGN.md): front cover embedded resized, full
+    // resolution kept as a file next to the tracks.
+    var embedFrontCover: Bool {
+        didSet { defaults.set(embedFrontCover, forKey: Key.embedFrontCover) }
+    }
+    var saveCoverFile: Bool {
+        didSet { defaults.set(saveCoverFile, forKey: Key.saveCoverFile) }
+    }
+    // GENRE / STYLE come from Discogs when a Discogs release matched.
+    var writeGenresFromDiscogs: Bool {
+        didSet { defaults.set(writeGenresFromDiscogs, forKey: Key.genresFromDiscogs) }
+    }
 
     var acoustIDKey: String {
         didSet { Self.store(acoustIDKey, account: KeychainAccount.acoustIDKey) }
@@ -80,6 +95,9 @@ final class AppSettings {
         extractMultichannel = defaults.bool(forKey: Key.extractMultichannel)
         sacdPausePolicy = defaults.string(forKey: Key.sacdPausePolicy).flatMap(SACDExtractOptions.PausePolicy.init(rawValue:)) ?? .appendToPrevious
         keepQueueBetweenLaunches = defaults.bool(forKey: Key.keepQueue)
+        embedFrontCover = defaults.object(forKey: Key.embedFrontCover) as? Bool ?? true
+        saveCoverFile = defaults.object(forKey: Key.saveCoverFile) as? Bool ?? true
+        writeGenresFromDiscogs = defaults.object(forKey: Key.genresFromDiscogs) as? Bool ?? true
         acoustIDKey = Keychain.get(KeychainAccount.acoustIDKey) ?? ""
         discogsToken = Keychain.get(KeychainAccount.discogsToken) ?? ""
         fanartKey = Keychain.get(KeychainAccount.fanartKey) ?? ""

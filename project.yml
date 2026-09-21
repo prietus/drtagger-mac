@@ -46,6 +46,8 @@ packages:
     path: Packages/DSTKit
   IdentifyKit:
     path: Packages/IdentifyKit
+  TagKit:
+    path: Packages/TagKit
 
 targets:
   drtagger:
@@ -72,6 +74,8 @@ targets:
         product: DSTKit
       - package: IdentifyKit
         product: IdentifyKit
+      - package: TagKit
+        product: TagKit
     info:
       path: App/Info.plist
       properties:
