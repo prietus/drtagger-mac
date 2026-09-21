@@ -11,11 +11,18 @@ import SwiftData
 @MainActor
 final class LibraryController {
 
-    private(set) var isScanning = false
+    private(set) var activeScans = 0
     private(set) var currentFolder: String?
     private(set) var lastScanSummary: String?
     private(set) var sessionIssues: [ScanIssue] = []
+    // Roots whose scan has not answered for a while, typically a network
+    // volume that stopped responding. The blocked read cannot be cancelled;
+    // the app keeps working and the result lands whenever the volume returns.
+    private(set) var stalledRoots: [URL] = []
     var selection: PersistentIdentifier?
+
+    var isScanning: Bool { activeScans > 0 }
+    static let stallSeconds: Double = 15
 
     // The container is retained here so the main context it owns stays
     // valid for as long as the controller lives.
@@ -56,23 +63,38 @@ final class LibraryController {
     // Scans the given roots and stores every album found. Existing records
     // (same path) are refreshed instead of duplicated.
     func addRoots(_ urls: [URL]) async {
-        guard !urls.isEmpty, !isScanning else { return }
-        isScanning = true
-        currentFolder = nil
+        guard !urls.isEmpty else { return }
+        activeScans += 1
         defer {
-            isScanning = false
-            currentFolder = nil
+            activeScans -= 1
+            if activeScans == 0 { currentFolder = nil }
+        }
+        let network = urls.filter { VolumeInfo.isNetworkVolume($0) }
+        if !network.isEmpty {
+            lastScanSummary = String(localized: "Reading from a network volume…")
         }
 
         let scanner = LibraryScanner()
-        let result = await Task.detached(priority: .userInitiated) { [self] in
+        let work = Task.detached(priority: .userInitiated) { [self] in
             scanner.scan(urls) { folder in
                 Task { @MainActor in
                     self.currentFolder = folder.lastPathComponent
                 }
             }
-        }.value
-
+        }
+        // Watchdog: report a stall instead of an endless "Scanning…".
+        let watchdog = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.stallSeconds))
+            guard !Task.isCancelled, let self else { return }
+            self.stalledRoots.append(contentsOf: urls)
+            let name = urls.first?.lastPathComponent ?? ""
+            self.lastScanSummary = network.isEmpty
+                ? String(localized: "Still reading \(name)… the volume is slow or not responding.")
+                : String(localized: "\(name) is on a network volume that is not responding. Check the mount (nfsstat -m) or use a local copy; the app keeps working.")
+        }
+        let result = await work.value
+        watchdog.cancel()
+        stalledRoots.removeAll { r in urls.contains(where: { $0.standardizedFileURL == r.standardizedFileURL }) }
         upsert(result)
     }
 
@@ -80,7 +102,6 @@ final class LibraryController {
     // progress (needsReview, confident, done…) survive the rescan; only
     // pending / scanning / error collapse to scanned.
     func rescan(_ record: AlbumRecord) async {
-        guard !isScanning else { return }
         let url = record.url
         let previous = record.state
         record.state = .scanning

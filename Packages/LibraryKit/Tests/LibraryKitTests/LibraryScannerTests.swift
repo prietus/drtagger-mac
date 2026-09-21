@@ -252,6 +252,66 @@ struct LibraryScannerTests {
 
         let r = FolderNameParser.parse("(Japanese_SICP-1700).High_Voltage")
         #expect(r.year == nil)
+        #expect(r.title == "High Voltage")
+        #expect(r.country == "JP")
+        #expect(r.notes == ["Japanese SICP-1700"])
+
+        let m = FolderNameParser.parse("Linkin Park - 2003 - Meteora 20th Anniversary Edition (MQA)")
+        #expect(m.artist == "Linkin Park")
+        #expect(m.year == "2003")
+        #expect(m.title == "Meteora")
+        #expect(m.edition == "20th Anniversary Edition")
+        #expect(m.displayTitle == "Meteora (20th Anniversary Edition)")
+        #expect(m.source == .digital)
+        #expect(m.notes == ["MQA"])
+
+        let d = FolderNameParser.parse("1974 - Diamond Dogs (1984, W. Germany, RCA PD83889)")
+        #expect(d.editionYear == "1984")
+        #expect(d.country == "DE")
+        #expect(d.source == nil)
+
+        let k = FolderNameParser.parse("Diana Krall- All For You XRCD Japan")
+        #expect(k.artist == "Diana Krall")
+        #expect(k.title == "All For You")
+        #expect(k.source == .cd)
+        #expect(k.country == "JP")
+
+        let w = FolderNameParser.parse("Miles Davis All Stars - Walkin' XRCD")
+        #expect(w.title == "Walkin'")
+        #expect(w.source == .cd)
+
+        let e = FolderNameParser.parse("Ella Fitzgerald & Oscar Peterson - Ella and Oscar (1975, JVC-XRCD)")
+        #expect(e.artist == "Ella Fitzgerald & Oscar Peterson")
+        #expect(e.title == "Ella and Oscar")
+        #expect(e.year == "1975")
+        #expect(e.source == .cd)
+
+        let vh = FolderNameParser.parse("Van Halen - 1984")
+        #expect(vh.artist == "Van Halen")
+        #expect(vh.title == "1984")
+        #expect(vh.year == "1984")
+
+        let aja = FolderNameParser.parse("Steely Dan - Aja 1977")
+        #expect(aja.title == "Aja")
+        #expect(aja.year == "1977")
+
+        let pf = FolderNameParser.parse("Pink Floyd - The Dark Side of the Moon (2011 Remaster) [24-96]")
+        #expect(pf.title == "The Dark Side of the Moon")
+        #expect(pf.edition == "2011 Remaster")
+        #expect(pf.editionYear == "2011")
+        #expect(pf.source == .digital)
+
+        let lp = FolderNameParser.parse("Led Zeppelin - Physical Graffiti (24-96 Vinyl Rip)")
+        #expect(lp.source == .vinyl, "the physical medium wins over the bit depth")
+
+        let us = FolderNameParser.parse("Some Band - The Best of Us")
+        #expect(us.title == "The Best of Us", "a plain word is never a country code")
+
+        let tag = FolderNameParser.parseAlbumTitle("Meteora (20th Anniversary Edition)")
+        #expect(tag.title == "Meteora")
+        #expect(tag.edition == "20th Anniversary Edition")
+        #expect(FolderNameParser.parseAlbumTitle("Aja").title == "Aja")
+        #expect(FolderNameParser.parseAlbumTitle("LP").title == "LP")
 
         #expect(FileRules.discNumber(fromFolderName: "CD1") == 1)
         #expect(FileRules.discNumber(fromFolderName: "Disc 2 - Live") == 2)
@@ -277,5 +337,27 @@ struct LibraryScannerTests {
         #expect(leno.kind == .trackFolder)
         #expect(leno.discs[0].cue?.encodingName == "utf-8-bom")
         #expect(leno.discs[0].trackFiles.count == 8)
+    }
+}
+
+@Suite("VolumeInfo")
+struct VolumeInfoTests {
+    @Test func rootIsLocalAndMountsAreListed() {
+        let mounts = VolumeInfo.mounts()
+        #expect(mounts.contains { $0.mountPoint == "/" })
+        #expect(VolumeInfo.mount(for: "/")?.mountPoint == "/")
+        #expect(!VolumeInfo.isNetworkVolume(URL(fileURLWithPath: NSTemporaryDirectory())))
+        #expect(VolumeInfo.mount(for: "/Users")?.isNetwork == false)
+    }
+}
+
+extension VolumeInfoTests {
+    // Automounted NFS shows up as autofs + nfs on the same mount point.
+    @Test func prefersRealFileSystemOverAutofs() {
+        let nfs = VolumeInfo.mounts().first { $0.isNetwork }
+        guard let nfs else { return }     // no network mounts on this machine
+        let m = VolumeInfo.mount(for: nfs.mountPoint + "/some/file.iso")
+        #expect(m?.fileSystem == nfs.fileSystem)
+        #expect(VolumeInfo.isNetworkVolume(URL(fileURLWithPath: nfs.mountPoint + "/x")))
     }
 }

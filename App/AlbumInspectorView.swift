@@ -16,6 +16,7 @@ struct AlbumInspectorView: View {
                 header
                 if let detected {
                     overview(detected)
+                    IdentificationView(record: record)
                     if record.isSplittable {
                         DiscIdentityView(record: record)
                     }
@@ -251,7 +252,7 @@ struct AlbumInspectorView: View {
     private func artworkSection(_ files: [URL]) -> some View {
         GroupBox("Artwork (\(files.count))") {
             ScrollView(.horizontal) {
-                HStack(spacing: 10) {
+                LazyHStack(spacing: 10) {
                     ForEach(files, id: \.self) { url in
                         VStack(spacing: 4) {
                             ArtworkThumbnail(url: url, side: 110)
@@ -290,8 +291,63 @@ struct AlbumInspectorView: View {
     }
 }
 
-// Decodes a downscaled thumbnail off the main thread with ImageIO so a
-// 30 MB booklet scan never blocks the UI.
+// Thumbnails are decoded through one loader with a small concurrency limit
+// on a GCD queue (never the Swift cooperative pool: a slow network volume
+// would otherwise starve every other async task in the app) and cached.
+actor ThumbnailLoader {
+    static let shared = ThumbnailLoader()
+
+    private let cache = NSCache<NSString, CGImage>()
+    private var running = 0
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private let maxConcurrent = 2
+    private let queue = DispatchQueue(label: "us.priet.drtagger.thumbnails", qos: .utility, attributes: .concurrent)
+
+    init() {
+        cache.countLimit = 400
+    }
+
+    func thumbnail(for url: URL, maxPixel: Int) async -> CGImage? {
+        let key = "\(maxPixel)|\(url.path)" as NSString
+        if let cached = cache.object(forKey: key) { return cached }
+        await acquire()
+        defer { release() }
+        let image: CGImage? = await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: Self.decode(url, maxPixel: maxPixel))
+            }
+        }
+        if let image { cache.setObject(image, forKey: key) }
+        return image
+    }
+
+    private func acquire() async {
+        if running < maxConcurrent {
+            running += 1
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+        running += 1
+    }
+
+    private func release() {
+        running -= 1
+        if !waiters.isEmpty { waiters.removeFirst().resume() }
+    }
+
+    nonisolated static func decode(_ url: URL, maxPixel: Int) -> CGImage? {
+        let sourceOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions as CFDictionary) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+}
+
 struct ArtworkThumbnail: View {
     let url: URL
     let side: CGFloat
@@ -312,21 +368,7 @@ struct ArtworkThumbnail: View {
         .frame(width: side, height: side)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .task(id: url) {
-            let target = Int(side * 2)
-            let loaded = await Task.detached(priority: .utility) {
-                Self.thumbnail(for: url, maxPixel: target)
-            }.value
-            image = loaded
+            image = await ThumbnailLoader.shared.thumbnail(for: url, maxPixel: Int(side * 2))
         }
-    }
-
-    nonisolated static func thumbnail(for url: URL, maxPixel: Int) -> CGImage? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-        ]
-        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
     }
 }

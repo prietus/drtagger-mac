@@ -41,6 +41,12 @@ struct GeneralSettingsView: View {
                 }
                 Toggle("Move original images to the Trash after a verified split", isOn: $settings.moveOriginalsToTrash)
             }
+            Section("Queue") {
+                Toggle("Remember the queue between launches", isOn: $settings.keepQueueBetweenLaunches)
+                Text("Off: the app starts with an empty queue every time. On: albums and their identification results stay until you remove them.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("SACD") {
                 Toggle("Also extract the multichannel area when present", isOn: $settings.extractMultichannel)
                 Picker("Audio between tracks", selection: $settings.sacdPausePolicy) {
@@ -84,7 +90,10 @@ struct ProvidersSettingsView: View {
             }
             Section("Discogs (credits, editions, catalog numbers)") {
                 SecureField("Personal access token", text: $settings.discogsToken)
-                Link("Generate a token in your Discogs developer settings", destination: URL(string: "https://www.discogs.com/settings/developers")!)
+                Text("Use the personal access token from \"Generate new token\" on the developer page, not an application's Consumer Key or Consumer Secret (those are for OAuth apps).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Link("Open your Discogs developer settings", destination: URL(string: "https://www.discogs.com/settings/developers")!)
                     .font(.caption)
             }
             Section("fanart.tv (high-resolution artwork)") {

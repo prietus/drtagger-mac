@@ -109,6 +109,60 @@ public struct FFmpegTool: Sendable {
         )
     }
 
+    // MARK: Tags
+
+    // Container tags as ffprobe reports them (format-level plus the first
+    // audio stream's), keys upper-cased. Works for FLAC, APE, WavPack, TTA,
+    // ALAC, DSF and WAV alike.
+    public func probeTags(_ url: URL) async throws -> [String: String] {
+        let args = [
+            "-v", "error", "-select_streams", "a:0",
+            "-show_entries", "format_tags:stream_tags",
+            "-of", "json", url.path,
+        ]
+        let result = try await ProcessLauncher.run(ffprobe, arguments: args)
+        guard result.status == 0 else {
+            throw ToolError.failed(command: "ffprobe tags", status: result.status, stderr: result.stderrText)
+        }
+        guard let root = try? JSONSerialization.jsonObject(with: result.stdout) as? [String: Any] else {
+            throw ToolError.badProbeOutput("tags")
+        }
+        var tags: [String: String] = [:]
+        if let streams = root["streams"] as? [[String: Any]], let st = streams.first?["tags"] as? [String: Any] {
+            for (k, v) in st { tags[k.uppercased()] = "\(v)" }
+        }
+        if let format = root["format"] as? [String: Any], let ft = format["tags"] as? [String: Any] {
+            for (k, v) in ft { tags[k.uppercased()] = "\(v)" }
+        }
+        return tags
+    }
+
+    // Decodes `seconds` of audio from `start` into 16-bit interleaved PCM
+    // at the source rate (down-mixed to at most two channels), the input
+    // chromaprint expects. Returns samples per channel and the rate.
+    public func decodeSnippet(_ url: URL, start: Double = 0, seconds: Double = 120) async throws -> (samples: [Int16], sampleRate: Int, channels: Int) {
+        let info = try await probe(url)
+        let channels = min(2, max(1, info.channels))
+        var args = ["-v", "error", "-nostdin"]
+        if start > 0 { args += ["-ss", String(format: "%.3f", start)] }
+        args += [
+            "-i", url.path,
+            "-t", String(format: "%.3f", seconds),
+            "-map", "0:a:0", "-vn",
+            "-ac", String(channels),
+            "-f", "s16le", "-acodec", "pcm_s16le",
+            "pipe:1",
+        ]
+        let result = try await ProcessLauncher.run(ffmpeg, arguments: args)
+        guard result.status == 0 else {
+            throw ToolError.failed(command: "ffmpeg snippet", status: result.status, stderr: result.stderrText)
+        }
+        let count = result.stdout.count / 2
+        var samples = [Int16](repeating: 0, count: count)
+        _ = samples.withUnsafeMutableBytes { result.stdout.copyBytes(to: $0, count: count * 2) }
+        return (samples, info.sampleRate, channels)
+    }
+
     // MARK: Decode
 
     // Decodes the whole file to raw interleaved PCM. Returns the sample

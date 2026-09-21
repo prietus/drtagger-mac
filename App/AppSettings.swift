@@ -23,6 +23,7 @@ final class AppSettings {
         static let moveOriginalsToTrash = "split.moveOriginalsToTrash"
         static let extractMultichannel = "sacd.extractMultichannel"
         static let sacdPausePolicy = "sacd.pausePolicy"
+        static let keepQueue = "queue.keepBetweenLaunches"
     }
 
     // Destination library root for split tracks. Empty = not configured.
@@ -50,6 +51,13 @@ final class AppSettings {
         didSet { defaults.set(sacdPausePolicy.rawValue, forKey: Key.sacdPausePolicy) }
     }
 
+    // The queue is a work session: by default it starts empty on every
+    // launch. Turn this on to keep albums (and their identification results)
+    // across launches.
+    var keepQueueBetweenLaunches: Bool {
+        didSet { defaults.set(keepQueueBetweenLaunches, forKey: Key.keepQueue) }
+    }
+
     var acoustIDKey: String {
         didSet { Self.store(acoustIDKey, account: KeychainAccount.acoustIDKey) }
     }
@@ -71,6 +79,7 @@ final class AppSettings {
         moveOriginalsToTrash = defaults.bool(forKey: Key.moveOriginalsToTrash)
         extractMultichannel = defaults.bool(forKey: Key.extractMultichannel)
         sacdPausePolicy = defaults.string(forKey: Key.sacdPausePolicy).flatMap(SACDExtractOptions.PausePolicy.init(rawValue:)) ?? .appendToPrevious
+        keepQueueBetweenLaunches = defaults.bool(forKey: Key.keepQueue)
         acoustIDKey = Keychain.get(KeychainAccount.acoustIDKey) ?? ""
         discogsToken = Keychain.get(KeychainAccount.discogsToken) ?? ""
         fanartKey = Keychain.get(KeychainAccount.fanartKey) ?? ""

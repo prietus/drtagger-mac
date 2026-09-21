@@ -7,11 +7,16 @@ struct DrtaggerApp: App {
     @State private var settings = AppSettings()
     @State private var library: LibraryController
     @State private var disc = DiscService()
+    @State private var identify = IdentifyService()
 
     init() {
         let container = Self.makeContainer()
         self.container = container
-        _library = State(initialValue: LibraryController(container: container))
+        let library = LibraryController(container: container)
+        if !UserDefaults.standard.bool(forKey: "queue.keepBetweenLaunches") {
+            library.removeAll()
+        }
+        _library = State(initialValue: library)
     }
 
     var body: some Scene {
@@ -20,6 +25,7 @@ struct DrtaggerApp: App {
                 .environment(settings)
                 .environment(library)
                 .environment(disc)
+                .environment(identify)
         }
         .modelContainer(container)
         .defaultSize(width: 1180, height: 760)
@@ -29,6 +35,11 @@ struct DrtaggerApp: App {
                     library.presentAddPanel()
                 }
                 .keyboardShortcut("o", modifiers: .command)
+                Divider()
+                Button("Clear Queue") {
+                    library.removeAll()
+                }
+                .keyboardShortcut(.delete, modifiers: [.command, .shift])
             }
         }
 

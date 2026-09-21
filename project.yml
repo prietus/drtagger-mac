@@ -18,10 +18,14 @@ settings:
     MACOSX_DEPLOYMENT_TARGET: "15.0"
     ENABLE_HARDENED_RUNTIME: YES
     ENABLE_USER_SCRIPT_SANDBOXING: NO
-    # Local builds sign ad hoc. For distribution set your team and a
-    # "Developer ID Application" identity in Xcode (Signing & Capabilities).
-    CODE_SIGN_STYLE: Automatic
-    CODE_SIGN_IDENTITY: "-"
+    # Every build is signed with the Developer ID certificate (manual
+    # signing, no profile needed without restricted entitlements) so the app
+    # keeps a stable code identity across rebuilds; with ad hoc signing each
+    # build is a new identity and macOS re-asks Keychain permission for the
+    # stored API keys, which looks like a hang when the prompt is hidden.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "Developer ID Application"
+    DEVELOPMENT_TEAM: LFTD9T269J
     SWIFT_EMIT_LOC_STRINGS: YES
     DEAD_CODE_STRIPPING: YES
 
@@ -40,6 +44,8 @@ packages:
     path: Packages/SACDKit
   DSTKit:
     path: Packages/DSTKit
+  IdentifyKit:
+    path: Packages/IdentifyKit
 
 targets:
   drtagger:
@@ -64,6 +70,8 @@ targets:
         product: SACDKit
       - package: DSTKit
         product: DSTKit
+      - package: IdentifyKit
+        product: IdentifyKit
     info:
       path: App/Info.plist
       properties:

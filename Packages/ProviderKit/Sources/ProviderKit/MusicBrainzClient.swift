@@ -31,7 +31,7 @@ public actor MusicBrainzClient {
     public func searchByCatalog(_ catalogNumber: String, limit: Int = 10) async throws -> [Candidate] {
         let trimmed = catalogNumber.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return [] }
-        let query = "catno:\"\(escape(trimmed))\""
+        let query = Self.catalogQuery(trimmed)
 
         var components = URLComponents(url: baseURL.appendingPathComponent("release"), resolvingAgainstBaseURL: false)!
         components.queryItems = [
@@ -43,6 +43,52 @@ public actor MusicBrainzClient {
 
         let data = try await sendRateLimited(url: url)
         let response = try JSONDecoder().decode(MBReleaseSearchResponse.self, from: data)
+        return response.releases.map { Self.toCandidate($0, disambiguationFallback: nil) }
+    }
+
+    // Exact lookup by EAN-13 / UPC barcode. Leading zeros differ between
+    // UPC-A and EAN-13 spellings, so both forms are tried.
+    public func searchByBarcode(_ barcode: String, limit: Int = 10) async throws -> [Candidate] {
+        let digits = barcode.filter(\.isNumber)
+        guard digits.count >= 8 else { return [] }
+        var forms = [digits]
+        if digits.count == 12 { forms.append("0" + digits) }
+        if digits.count == 13, digits.hasPrefix("0") { forms.append(String(digits.dropFirst())) }
+        let query = forms.map { "barcode:\($0)" }.joined(separator: " OR ")
+
+        var components = URLComponents(url: baseURL.appendingPathComponent("release"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [
+            URLQueryItem(name: "query", value: query),
+            URLQueryItem(name: "fmt", value: "json"),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ]
+        guard let url = components.url else { return [] }
+        let data = try await sendRateLimited(url: url)
+        let response = try JSONDecoder().decode(MBReleaseSearchResponse.self, from: data)
+        return response.releases.map { Self.toCandidate($0, disambiguationFallback: nil) }
+    }
+
+    // Releases containing a CD with this Disc ID. When the ID is unknown
+    // and `toc` is given, MusicBrainz falls back to a fuzzy TOC match
+    // (same track offsets within a small tolerance). Returns [] on 404.
+    public func lookupDiscID(_ discID: String, toc: String? = nil) async throws -> [Candidate] {
+        var components = URLComponents(url: baseURL.appendingPathComponent("discid/\(discID)"), resolvingAgainstBaseURL: false)!
+        var items = [
+            URLQueryItem(name: "fmt", value: "json"),
+            URLQueryItem(name: "inc", value: "recordings+artist-credits+labels+release-groups"),
+            URLQueryItem(name: "cdstubs", value: "no"),
+        ]
+        // MusicBrainz wants "first+last+leadout+offsets…" with plus signs.
+        if let toc { items.append(URLQueryItem(name: "toc", value: toc.replacingOccurrences(of: " ", with: "+"))) }
+        components.queryItems = items
+        guard let url = components.url else { throw ProviderError.invalidURL }
+        let data: Data
+        do {
+            data = try await sendRateLimited(url: url)
+        } catch ProviderError.httpError(404) {
+            return []
+        }
+        let response = try JSONDecoder().decode(MBDiscResponse.self, from: data)
         return response.releases.map { Self.toCandidate($0, disambiguationFallback: nil) }
     }
 
@@ -86,7 +132,7 @@ public actor MusicBrainzClient {
         )!
         components.queryItems = [
             URLQueryItem(name: "fmt", value: "json"),
-            URLQueryItem(name: "inc", value: "recordings+artist-credits+labels+media+release-groups"),
+            URLQueryItem(name: "inc", value: "recordings+artist-credits+labels+media+release-groups+discids"),
         ]
         guard let url = components.url else {
             throw ProviderError.invalidURL
@@ -139,15 +185,54 @@ public actor MusicBrainzClient {
         req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
 
-        let (data, resp) = try await session.data(for: req)
-        if let http = resp as? HTTPURLResponse, http.statusCode >= 400 {
-            throw ProviderError.httpError(http.statusCode)
+        // MusicBrainz answers 503 ("server busy") under load; back off and
+        // retry a couple of times before giving up.
+        var attempt = 0
+        while true {
+            let (data, resp) = try await session.data(for: req)
+            if let http = resp as? HTTPURLResponse, http.statusCode >= 400 {
+                if (http.statusCode == 503 || http.statusCode == 429) && attempt < 2 {
+                    attempt += 1
+                    try await Task.sleep(nanoseconds: UInt64(1.5 * Double(attempt) * 1_000_000_000))
+                    nextAllowedRequest = Date().addingTimeInterval(1.05)
+                    continue
+                }
+                throw ProviderError.httpError(http.statusCode)
+            }
+            return data
         }
-        return data
     }
 
     private nonisolated func escape(_ s: String) -> String {
         s.replacingOccurrences(of: "\"", with: "\\\"")
+    }
+
+    // Labels print catalog numbers one way and MusicBrainz editors enter
+    // them another ("CAPP139 SA" vs "CAPP 139 SA" vs "CAPP-139-SA"), so the
+    // query ORs the exact spellings with a prefix wildcard on the glued
+    // letters+digits head.
+    nonisolated static func catalogQuery(_ raw: String) -> String {
+        let alnum = raw.uppercased().filter { $0.isLetter || $0.isNumber }
+        var variants: [String] = [raw]
+        // Split letters / digits boundaries with spaces and with hyphens.
+        var spaced = ""
+        var previous: Character? = nil
+        for ch in alnum {
+            if let p = previous, p.isLetter != ch.isLetter { spaced.append(" ") }
+            spaced.append(ch)
+            previous = ch
+        }
+        variants.append(spaced)
+        variants.append(spaced.replacingOccurrences(of: " ", with: "-"))
+        variants.append(alnum)
+        var seen = Set<String>()
+        var terms = variants.filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+            .map { "catno:\"\($0.replacingOccurrences(of: "\"", with: "\\\""))\"" }
+        // Prefix wildcard: letters plus the first digit run ("CAPP139*").
+        if let m = alnum.firstMatch(of: #/^([A-Z]{2,10}[0-9]{2,7})/#) {
+            terms.append("catno:\(m.1)*")
+        }
+        return terms.joined(separator: " OR ")
     }
 
     // MARK: JSON → Candidate mapping
@@ -181,18 +266,40 @@ public actor MusicBrainzClient {
             ? nil
             : Array(NSOrderedSet(array: catalogNumbers)).compactMap { $0 as? String }.joined(separator: ", ")
 
-        let firstMedium = release.media?.first
-        let mediaFormat = firstMedium?.format
-        let trackCount = release.trackCount ?? firstMedium?.trackCount
-
-        let tracks: [CandidateTrack] = (firstMedium?.tracks ?? []).enumerated().map { idx, t in
-            CandidateTrack(
-                position: Int(t.number ?? "\(idx + 1)") ?? (idx + 1),
-                title: t.title ?? "",
-                artist: nil,
-                durationMS: t.length
+        let mediaList: [CandidateMedium] = (release.media ?? []).enumerated().map { mIdx, m in
+            let tracks: [CandidateTrack] = (m.tracks ?? []).enumerated().map { idx, t in
+                let credit = t.artistCredit?.map { $0.name ?? $0.artist?.name ?? "" }.filter { !$0.isEmpty }.joined(separator: ", ")
+                return CandidateTrack(
+                    position: Int(t.number ?? "\(idx + 1)") ?? (t.position ?? idx + 1),
+                    title: t.title ?? t.recording?.title ?? "",
+                    artist: (credit?.isEmpty == false && credit != artist) ? credit : nil,
+                    durationMS: t.length ?? t.recording?.length,
+                    recordingID: t.recording?.id,
+                    trackID: t.id
+                )
+            }
+            return CandidateMedium(
+                position: m.position ?? mIdx + 1,
+                format: m.format,
+                title: m.title,
+                tracks: tracks,
+                discIDs: (m.discs ?? []).compactMap(\.id),
+                trackCount: m.trackCount
             )
         }
+        let firstMedium = release.media?.first
+        let formats = mediaList.compactMap(\.format)
+        let mediaFormat: String? = {
+            guard let f = formats.first else { return firstMedium?.format }
+            let count = mediaList.count
+            if count > 1 && formats.allSatisfy({ $0 == f }) { return "\(count)×\(f)" }
+            // Layers of one disc: "Hybrid SACD (CD layer)" + "Hybrid SACD (SACD layer…)" → "Hybrid SACD".
+            let heads = Set(formats.map { $0.components(separatedBy: " (").first ?? $0 })
+            if heads.count == 1, formats.contains(where: { $0.lowercased().contains("layer") }) { return heads.first }
+            return f
+        }()
+        let trackCount = release.trackCount ?? (mediaList.isEmpty ? firstMedium?.trackCount : mediaList.reduce(0) { $0 + ($1.tracks.isEmpty ? 0 : $1.tracks.count) })
+        let tracks: [CandidateTrack] = mediaList.first?.tracks ?? []
 
         // Cover Art Archive serves per-release front covers at a predictable
         // URL. Many releases have no cover — in that case the URL 404s and
@@ -214,7 +321,12 @@ public actor MusicBrainzClient {
             trackCount: trackCount,
             disambiguation: release.disambiguation ?? disambiguationFallback,
             coverArtURL: coverURL,
-            tracks: tracks
+            tracks: tracks,
+            releasedDate: (release.date?.count ?? 0) >= 10 ? release.date : nil,
+            barcode: release.barcode.flatMap { $0.isEmpty ? nil : $0 },
+            media: mediaList,
+            status: release.status,
+            primaryType: release.releaseGroup?.primaryType
         )
     }
 }
@@ -229,12 +341,18 @@ private struct MBReleaseBrowseResponse: Decodable {
     let releases: [MBRelease]
 }
 
+private struct MBDiscResponse: Decodable {
+    let releases: [MBRelease]
+}
+
 private struct MBRelease: Decodable {
     let id: String
     let title: String?
     let date: String?
     let country: String?
     let disambiguation: String?
+    let barcode: String?
+    let status: String?
     let trackCount: Int?
     let artistCredit: [MBArtistCredit]?
     let labelInfo: [MBLabelInfo]?
@@ -247,7 +365,7 @@ private struct MBRelease: Decodable {
     var releaseGroupID: String? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, title, date, country, disambiguation
+        case id, title, date, country, disambiguation, barcode, status
         case trackCount = "track-count"
         case artistCredit = "artist-credit"
         case labelInfo = "label-info"
@@ -258,6 +376,11 @@ private struct MBRelease: Decodable {
 
 private struct MBReleaseGroup: Decodable {
     let id: String
+    let primaryType: String?
+    enum CodingKeys: String, CodingKey {
+        case id
+        case primaryType = "primary-type"
+    }
 }
 
 private struct MBArtistCredit: Decodable {
@@ -283,18 +406,38 @@ private struct MBLabel: Decodable {
 }
 
 private struct MBMedium: Decodable {
+    let position: Int?
     let format: String?
+    let title: String?
     let trackCount: Int?
     let tracks: [MBTrack]?
+    let discs: [MBDisc]?
     enum CodingKeys: String, CodingKey {
-        case format
+        case position, format, title, tracks, discs
         case trackCount = "track-count"
-        case tracks
     }
 }
 
+private struct MBDisc: Decodable {
+    let id: String?
+}
+
 private struct MBTrack: Decodable {
+    let id: String?
     let number: String?
+    let position: Int?
+    let title: String?
+    let length: Int?
+    let recording: MBRecording?
+    let artistCredit: [MBArtistCredit]?
+    enum CodingKeys: String, CodingKey {
+        case id, number, position, title, length, recording
+        case artistCredit = "artist-credit"
+    }
+}
+
+private struct MBRecording: Decodable {
+    let id: String?
     let title: String?
     let length: Int?
 }

@@ -1,3 +1,4 @@
+import IdentifyKit
 import LibraryKit
 import SACDKit
 import SplitKit
@@ -7,7 +8,9 @@ import SwiftUI
 struct ContentView: View {
     @Environment(LibraryController.self) private var library
     @Environment(DiscService.self) private var disc
+    @Environment(IdentifyService.self) private var identify
     @Environment(AppSettings.self) private var settings
+    @State private var confirmClear = false
 
     var body: some View {
         @Bindable var library = library
@@ -40,7 +43,7 @@ struct ContentView: View {
                 } label: {
                     Label("Rescan", systemImage: "arrow.clockwise")
                 }
-                .disabled(library.selection == nil || library.isScanning)
+                .disabled(library.selection == nil)
                 .help("Scan the selected album's folder again")
 
                 Button {
@@ -48,12 +51,32 @@ struct ContentView: View {
                 } label: {
                     Label("Add Folders…", systemImage: "plus")
                 }
-                .disabled(library.isScanning)
                 .help("Add folders or image files to the queue")
+
+                Button {
+                    if let record = library.record(id: library.selection) { library.remove([record]) }
+                } label: {
+                    Label("Remove", systemImage: "minus")
+                }
+                .disabled(library.selection == nil || library.isScanning)
+                .help("Remove the selected album from the queue")
+
+                Button {
+                    confirmClear = true
+                } label: {
+                    Label("Clear Queue", systemImage: "trash")
+                }
+                .disabled(library.isScanning)
+                .help("Empty the queue (files on disk are never touched)")
             }
         }
+        .confirmationDialog("Remove every album from the queue?", isPresented: $confirmClear, titleVisibility: .visible) {
+            Button("Clear Queue", role: .destructive) { library.removeAll() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Only the queue is cleared. Nothing is deleted from disk; scan results and identifications for these albums are forgotten.")
+        }
         .dropDestination(for: URL.self) { urls, _ in
-            guard !library.isScanning else { return false }
             Task { await library.addRoots(urls) }
             return true
         }
@@ -62,6 +85,7 @@ struct ContentView: View {
             await library.importLaunchArguments()
             await splitFromLaunchArguments()
             await extractFromLaunchArguments()
+            await identifyFromLaunchArguments()
         }
     }
 }
@@ -90,6 +114,25 @@ extension ContentView {
             options.overwriteExisting = true
             options.pausePolicy = settings.sacdPausePolicy
             await disc.extractSACD(record, into: destination, multichannel: settings.extractMultichannel, options: options)
+        }
+    }
+}
+
+extension ContentView {
+    // `--identify` runs identification on every album in the store.
+    func identifyFromLaunchArguments(_ arguments: [String] = CommandLine.arguments) async {
+        guard arguments.contains("--identify") else { return }
+        for record in library.allRecords() {
+            await identify.identify(record, settings: settings)
+            // One line per album on stderr so scripts can read the verdict.
+            let verdict: String
+            if let r = record.identification, let best = r.best {
+                let c = best.candidate
+                verdict = "\(c.artist) – \(c.title) (\(c.year ?? "?"), \(c.mediaFormat ?? "?"), \(c.catalogNumber ?? "-")) \(best.confidence.rawValue) \(Int(best.score))"
+            } else {
+                verdict = identify.error(for: record) ?? "no candidates"
+            }
+            FileHandle.standardError.write(Data("identify: \(record.displayTitle): \(verdict)\n".utf8))
         }
     }
 }
@@ -161,7 +204,12 @@ struct QueueStatusBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            if library.isScanning {
+            if !library.stalledRoots.isEmpty, let summary = library.lastScanSummary {
+                Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+                Text(summary)
+                    .lineLimit(2)
+                    .foregroundStyle(.orange)
+            } else if library.isScanning {
                 ProgressView().controlSize(.mini)
                 Text(library.currentFolder.map { String(localized: "Scanning \($0)…") } ?? String(localized: "Scanning…"))
                     .lineLimit(1)
@@ -173,6 +221,12 @@ struct QueueStatusBar: View {
                 Text(count == 1 ? String(localized: "1 album") : String(localized: "\(count) albums"))
             }
             Spacer()
+            if count > 0 && !library.isScanning {
+                Button("Clear") { library.removeAll() }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .help("Empty the queue")
+            }
         }
         .font(.caption)
         .foregroundStyle(.secondary)

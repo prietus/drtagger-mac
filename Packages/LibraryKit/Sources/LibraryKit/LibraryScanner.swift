@@ -88,7 +88,7 @@ public struct DetectedAlbum: Sendable, Equatable, Codable, Hashable, Identifiabl
     public var titleHint: String? {
         if let t = sacd?.title { return t }
         if let t = discs.first?.cue?.title, !t.isEmpty { return t }
-        return FolderNameParser.parse(folderName).title
+        return FolderNameParser.parse(folderName).displayTitle
     }
 
     public var artistHint: String? {
@@ -387,36 +387,270 @@ public struct LibraryScanner: Sendable {
     }
 }
 
-// Pulls "Artist - Title", a year, and edition noise out of folder names
-// like "1974 - Diamond Dogs (1984, W. Germany, RCA PD83889)".
+// Pulls artist, title, years, edition, source format and country out of
+// folder names such as
+//   "1974 - Diamond Dogs (1984, W. Germany, RCA PD83889)"
+//   "Linkin Park - 2003 - Meteora 20th Anniversary Edition (MQA)"
+//   "Diana Krall- All For You XRCD Japan"
+// The bracketed notes are kept verbatim so IdentifyKit can mine them for
+// catalog numbers and barcodes.
 public enum FolderNameParser {
+
+    // What the folder name says the audio came from.
+    public enum SourceHint: String, Sendable, Codable, Hashable, CaseIterable {
+        case cd, sacd, vinyl, digital, dvd
+    }
 
     public struct Parsed: Sendable, Equatable {
         public var artist: String?
-        public var title: String?
-        public var year: String?
+        public var title: String?          // core title, edition words removed
+        public var year: String?           // first year seen: usually the original release
+        public var editionYear: String?    // a second year (pressing / remaster)
+        public var edition: String?        // "20th Anniversary Edition", "2011 Remaster", …
+        public var source: SourceHint?
+        public var country: String?        // ISO 3166-1 alpha-2 as MusicBrainz uses it
+        public var notes: [String] = []    // bracketed groups, verbatim
+
+        public init() {}
+
+        // Title with the edition kept, for lists and sidebars.
+        public var displayTitle: String? {
+            guard let title else { return nil }
+            guard let edition else { return title }
+            return "\(title) (\(edition))"
+        }
     }
 
     public static func parse(_ name: String) -> Parsed {
-        var parsed = Parsed()
-        var s = name
+        var p = Parsed()
+        var s = name.replacingOccurrences(of: "_", with: " ")
 
-        if let m = s.firstMatch(of: #/\b((?:19|20)\d{2})\b/#) {
-            parsed.year = String(m.1)
+        // 1. Bracketed notes anywhere in the name.
+        for m in s.matches(of: bracketPattern) {
+            let note = String(m.1).trimmingCharacters(in: .whitespaces)
+            if !note.isEmpty { p.notes.append(note) }
         }
-        // Strip a leading "1974 - " / "1974. " / "(1974) "
-        s = s.replacing(#/^\(?(?:19|20)\d{2}\)?\s*[-._]?\s*/#, with: "")
-        // Drop trailing parenthesised / bracketed edition notes.
-        s = s.replacing(#/\s*[\(\[\{][^\)\]\}]*[\)\]\}]\s*$/#, with: "")
-        s = s.trimmingCharacters(in: .whitespaces)
+        s = s.replacing(bracketPattern, with: " ")
+        s = s.replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
 
-        let parts = s.components(separatedBy: " - ")
+        // 2. Years: "1974 - Title", "Artist - 2003 - Title".
+        if let m = s.firstMatch(of: #/^\s*((?:19|20)\d{2})\b\s*[-._]?\s*/#) {
+            p.year = String(m.1)
+            s.removeSubrange(m.range)
+        } else if let m = s.firstMatch(of: #/\s+[-–]\s+((?:19|20)\d{2})\s+[-–]\s+/#) {
+            p.year = String(m.1)
+            s.replaceSubrange(m.range, with: " - ")
+        }
+        s = trimSeparators(s)
+
+        // 3. "Artist - Title" (also "Artist – Title" and "Artist- Title").
+        var parts = s.components(separatedBy: " - ")
+        if parts.count == 1 { parts = s.components(separatedBy: " – ") }
+        if parts.count == 1, let m = s.firstMatch(of: #/^(.+?\S)-\s+(.+)$/#) { parts = [String(m.1), String(m.2)] }
+        var rawTitle: String
         if parts.count >= 2 {
-            parsed.artist = parts[0].trimmingCharacters(in: .whitespaces)
-            parsed.title = parts[1...].joined(separator: " - ").trimmingCharacters(in: .whitespaces)
-        } else if !s.isEmpty {
-            parsed.title = s
+            p.artist = trimSeparators(parts[0])
+            rawTitle = parts[1...].joined(separator: " - ")
+        } else {
+            rawTitle = s
         }
-        return parsed
+        rawTitle = trimSeparators(rawTitle)
+
+        // 4. A year left at either end of the title ("Aja 1977", "1984" alone stays).
+        if p.year == nil, let m = rawTitle.firstMatch(of: #/^((?:19|20)\d{2})\s+(\S.*)$|^(.*\S)\s+((?:19|20)\d{2})$/#) {
+            let year = m.1 ?? m.4, rest = m.2 ?? m.3
+            if let year, let rest { p.year = String(year); rawTitle = String(rest) }
+        }
+        if p.year == nil, rawTitle.wholeMatch(of: #/(?:19|20)\d{2}/#) != nil { p.year = rawTitle }
+
+        // 5. Edition / source / country words at the end of the title.
+        p.title = refine(title: rawTitle, into: &p)
+
+        // 6. The notes: whole pieces that are edition/source/country words,
+        // plus any further years.
+        for note in p.notes {
+            for piece in note.split(separator: #/\s*[,;/]\s*/#).map(String.init) {
+                let leftover = refineNote(piece, into: &p)
+                for m in leftover.matches(of: #/\b((?:19|20)\d{2})\b/#) { noteYear(String(m.1), into: &p) }
+            }
+        }
+        if p.artist?.isEmpty == true { p.artist = nil }
+        if p.title?.isEmpty == true { p.title = nil }
+        return p
+    }
+
+    // For an ALBUM tag: "Meteora (20th Anniversary Edition)" → title + edition.
+    public static func parseAlbumTitle(_ raw: String) -> Parsed {
+        var p = Parsed()
+        var s = raw
+        for m in s.matches(of: bracketPattern) {
+            let note = String(m.1).trimmingCharacters(in: .whitespaces)
+            if !note.isEmpty { p.notes.append(note) }
+        }
+        s = s.replacing(bracketPattern, with: " ")
+        s = s.replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+        p.title = refine(title: trimSeparators(s), into: &p)
+        for note in p.notes {
+            for piece in note.split(separator: #/\s*[,;/]\s*/#).map(String.init) {
+                let leftover = refineNote(piece, into: &p)
+                for m in leftover.matches(of: #/\b((?:19|20)\d{2})\b/#) { noteYear(String(m.1), into: &p) }
+            }
+        }
+        if p.title?.isEmpty == true { p.title = raw }
+        return p
+    }
+
+    // MARK: - Vocabulary
+
+    private static var bracketPattern: Regex<(Substring, Substring)> { #/[\(\[\{]([^\)\]\}]*)[\)\]\}]/# }
+
+    private enum Category { case edition, source(SourceHint), country(String), noise }
+
+    private struct Rule {
+        let category: Category
+        let regex: NSRegularExpression
+        let caseSensitive: Bool
+    }
+
+    // Each entry: a regex fragment (no anchors) and what it means.
+    private static let vocabulary: [(String, Category, Bool)] = [
+        // Editions.
+        (#"(?:\d{1,3}(?:st|nd|rd|th)\s+)?anniversary(?:\s+(?:super\s+)?deluxe)?(?:\s+(?:edition|version|box\s*set|reissue))?"#, .edition, false),
+        (#"(?:super\s+)?deluxe(?:\s+(?:edition|version|box\s*set))?"#, .edition, false),
+        (#"(?:19|20)\d{2}\s+(?:remaster(?:ed)?|reissue|mix|remix(?:ed)?|edition|version)"#, .edition, false),
+        (#"(?:expanded|special|limited|collector'?s|legacy|definitive|complete|ultimate|premium|extended|remastered|remaster|remixed|reissue|mono|stereo|box\s*set|bonus\s+tracks?|japan\s+edition|import)(?:\s+(?:edition|version))?"#, .edition, false),
+        // Physical / digital source.
+        (#"xrcd(?:2|24)?|k2\s?hd|shm-?cd|blu-?spec\s?cd2?|hdcd|u?hqcd|gold\s?cd|platinum\s?shm|target\s?cd|mfsl|\d?cds?"#, .source(.cd), false),
+        (#"shm-?sacd|sacd(?:-?r)?|dsd(?:64|128|256|512)?|dsf|dff|dst|iso"#, .source(.sacd), false),
+        (#"vinyl(?:\s*rip)?|vinylrip|lp|\d{3}\s?g(?:ram)?|12\"|7\"|10\""#, .source(.vinyl), false),
+        (#"dvd-?a(?:udio)?|dvd|blu-?ray(?:\s+audio)?|bd-?a|pure\s+audio"#, .source(.dvd), false),
+        (#"mqa|web(?:\s*-?\s*(?:flac|dl))?|hi-?res|hires|qobuz|tidal|itunes|bandcamp|hdtracks|digital|(?:16|24|32)\s?-?bits?|(?:16|24|32)[-/](?:44(?:\.1)?|48|88(?:\.2)?|96|176(?:\.4)?|192|352(?:\.8)?|384)(?:\s?khz)?|\d{2,3}(?:\.\d)?\s?khz"#, .source(.digital), false),
+        // Containers and rip markers: stripped, mean nothing about the source.
+        (#"flac|ape|wav|alac|aiff|wv|tak|m4a|mp3|aac|ogg|lossless|eac|xld|dbpoweramp|cue|log|rip"#, .noise, false),
+        // Countries by name (any case) and by code (upper case only).
+        (#"(?:japan(?:ese)?)(?:\s+(?:edition|press(?:ing)?|import|release|version))?"#, .country("JP"), false),
+        (#"w(?:est)?\.?\s*germany|germany|german|deutschland"#, .country("DE"), false),
+        (#"u\.s\.a?\.?|usa|america(?:n)?"#, .country("US"), false),
+        (#"u\.k\.|england|british|britain"#, .country("GB"), false),
+        (#"europe(?:an)?"#, .country("XE"), false),
+        (#"france|french"#, .country("FR"), false),
+        (#"italy|italian"#, .country("IT"), false),
+        (#"spain|spanish|españa"#, .country("ES"), false),
+        (#"holland|netherlands|dutch"#, .country("NL"), false),
+        (#"canada|canadian"#, .country("CA"), false),
+        (#"australia(?:n)?"#, .country("AU"), false),
+        (#"worldwide"#, .country("XW"), false),
+        (#"korea(?:n)?"#, .country("KR"), false),
+        (#"brazil(?:ian)?"#, .country("BR"), false),
+        (#"russia(?:n)?"#, .country("RU"), false),
+        (#"sweden|swedish"#, .country("SE"), false),
+        (#"norway|norwegian"#, .country("NO"), false),
+        (#"denmark|danish"#, .country("DK"), false),
+        (#"austria(?:n)?"#, .country("AT"), false),
+        (#"switzerland|swiss"#, .country("CH"), false),
+        (#"mexico|mexican"#, .country("MX"), false),
+        (#"argentina"#, .country("AR"), false),
+        (#"taiwan"#, .country("TW"), false),
+        (#"hong\s?kong"#, .country("HK"), false),
+        (#"china|chinese"#, .country("CN"), false),
+        (#"JPN?"#, .country("JP"), true),
+        (#"GER"#, .country("DE"), true),
+        (#"US"#, .country("US"), true),
+        (#"UK"#, .country("GB"), true),
+        (#"EU"#, .country("XE"), true),
+    ]
+
+    private static let tailRules: [Rule] = vocabulary.map { fragment, category, cs in
+        Rule(category: category,
+             regex: try! NSRegularExpression(pattern: #"(?:^|(?<=[\s,;/\-]))(?:"# + fragment + #")[\s,;.\-]*$"#, options: cs ? [] : [.caseInsensitive]),
+             caseSensitive: cs)
+    }
+
+    // Same vocabulary, matched anywhere: for bracketed notes.
+    private static let anywhereRules: [Rule] = vocabulary.map { fragment, category, cs in
+        Rule(category: category,
+             regex: try! NSRegularExpression(pattern: #"(?:^|(?<=[\s,;/\-]))(?:"# + fragment + #")(?=$|[\s,;.\-/])"#, options: cs ? [] : [.caseInsensitive]),
+             caseSensitive: cs)
+    }
+
+    // Classifies every known word in a note piece; returns what is left
+    // (catalog numbers, labels, plain years).
+    private static func refineNote(_ piece: String, into p: inout Parsed) -> String {
+        var text = piece
+        var editions: [String] = []
+        var sources: [SourceHint] = []
+        for rule in anywhereRules {
+            let matches = rule.regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+            for m in matches.reversed() {
+                guard let r = Range(m.range, in: text) else { continue }
+                let token = String(text[r])
+                switch rule.category {
+                case .edition: editions.insert(token, at: 0)
+                case .source(let hint): sources.append(hint)
+                case .country(let code): if p.country == nil { p.country = code }
+                case .noise: break
+                }
+                text.replaceSubrange(r, with: " ")
+            }
+        }
+        record(editions: editions, sources: sources, into: &p)
+        return text.trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func record(editions: [String], sources: [SourceHint], into p: inout Parsed) {
+        if !editions.isEmpty {
+            let joined = editions.joined(separator: ", ")
+            p.edition = p.edition.map { $0 + ", " + joined } ?? joined
+            // A year inside an edition phrase dates the edition, not the album.
+            for m in joined.matches(of: #/\b((?:19|20)\d{2})\b/#) where p.editionYear == nil && String(m.1) != p.year {
+                p.editionYear = String(m.1)
+            }
+        }
+        // Prefer the physical medium named over a mere bit depth.
+        for hint in [SourceHint.vinyl, .sacd, .dvd, .cd, .digital] where sources.contains(hint) {
+            if p.source == nil || (p.source == .digital && hint != .digital) { p.source = hint }
+            break
+        }
+    }
+
+    private static func refine(title raw: String, into p: inout Parsed) -> String {
+        var title = trimSeparators(raw)
+        var editions: [String] = []
+        var sources: [SourceHint] = []
+        var changed = true
+        var strippedSomething = false
+        while changed, !title.isEmpty {
+            changed = false
+            for rule in tailRules {
+                if case .country = rule.category, rule.caseSensitive, !strippedSomething { continue }
+                let range = NSRange(title.startIndex..., in: title)
+                guard let m = rule.regex.firstMatch(in: title, range: range), let r = Range(m.range, in: title) else { continue }
+                let token = trimSeparators(String(title[r]))
+                let rest = trimSeparators(String(title[..<r.lowerBound]))
+                // Never empty the title: "1984", "LP", "Mono" can be the album.
+                if rest.isEmpty { continue }
+                switch rule.category {
+                case .edition: editions.insert(token, at: 0)
+                case .source(let hint): sources.append(hint)
+                case .country(let code): if p.country == nil { p.country = code }
+                case .noise: break
+                }
+                title = rest
+                changed = true
+                strippedSomething = true
+                break
+            }
+        }
+        record(editions: editions, sources: sources, into: &p)
+        return title
+    }
+
+    private static func noteYear(_ year: String, into p: inout Parsed) {
+        if p.year == nil { p.year = year }
+        else if year != p.year, p.editionYear == nil { p.editionYear = year }
+    }
+
+    private static func trimSeparators(_ s: String) -> String {
+        s.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ".-–—,;:/")))
     }
 }

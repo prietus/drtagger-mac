@@ -51,10 +51,26 @@ scanner from `OBIScanner`.
 5. **Acoustic fingerprints** of all tracks (Chromaprint → AcoustID, 3 req/s),
    each track votes for the releases containing its recording; releases are
    ranked by coverage, track count and duration fit.
-6. **SACD disc text** or folder name as a free-text fallback query.
+6. **SACD disc text** or folder name as a free-text fallback query. The
+   folder name is parsed properly (`FolderNameParser`): "Artist - Year -
+   Title", trailing edition words ("20th Anniversary Edition", "2011
+   Remaster"), the medium ("XRCD", "Vinyl Rip", "MQA", "SACD"), the country
+   ("Japan", "W. Germany", "US") and bracketed notes, which are mined for
+   catalog numbers and barcodes. The edition triggers a second, more precise
+   text search; medium, country, edition and pressing year are soft scoring
+   signals. Picard tags feed the same hints (ALBUM edition, ORIGINALDATE vs
+   DATE, RELEASECOUNTRY, MEDIA).
 
 Every candidate is validated against track count and per-track durations.
 When two independent signals agree the candidate is marked *confident*.
+
+Each candidate also gets a format tier — *fits*, *unknown* or *unlikely* —
+from its media against what the local files allow (a SACD ISO can only be a
+SACD; a 16/44 rip can be a CD, a hybrid's CD layer or a download; hi-res PCM
+can be a download, vinyl, SACD or DVD-A) and the medium named in the folder,
+which always wins. The UI folds *unlikely* releases into a disclosure (on by
+default only for SACD images) and never hides them: MusicBrainz often lacks
+or mislabels formats, and the right edition may simply not exist there.
 
 ### Automation
 Confident candidates are preselected but **never written without a preview**.
@@ -209,10 +225,28 @@ blocks. Audio is never rewritten; stream MD5 is verified after each write.
   `{albumartist}/{album} ({year})/{track} {title}` safely. Verified on a
   real XRCD rip: all five track CRCs and the disc CRC equal the CTDB entry.
   ReplayGain / `ebur128` still to come (phase 6).
-- `Identify` — signal collection, candidate ranking, confidence.
+- `IdentifyKit` (phase 4, done) — `SignalCollector` gathers barcodes and
+  catalog numbers from artwork (Vision barcodes in three orientations, OCR
+  with `ja`, glued codes like PD83889 recognised), existing tags via ffprobe
+  (BARCODE, CATALOGNUMBER, MUSICBRAINZ_ALBUMID…), CUE hints, SACD disc text,
+  folder name (artist, title, year, edition, medium, country, catalog
+  numbers in brackets), the disc TOC and CUETools DB MBIDs, plus per-track
+  durations.
+  `FingerprintService` fingerprints 120 s of every track (Chromaprint via
+  ffmpeg PCM snippets, image ranges for CUE images), asks AcoustID and votes
+  per release with the consensus filter from drtagger. `Identifier` pools
+  MusicBrainz candidates from MBIDs, TOC lookup (fuzzy `toc=` works even when
+  the disc ID is unregistered), barcode, catalog number, fingerprints (plus
+  sibling editions of the top release groups) and text search, fetches
+  details, and `MatchScorer` ranks them with explainable reasons: track and
+  disc count, mean duration error, barcode / catalog / disc ID / MBID /
+  fingerprint coverage as strong signals, artist, title, year, edition,
+  pressing year, country and medium named in the folder as soft ones. Confident = two strong signals agreeing with fitting durations and a
+  clear lead over the runner-up. Discogs candidates (barcode / catalog) are
+  kept for the credits merge. Verified live: XRCD image identified from TOC +
+  fingerprints in 14 s, a split folder from scans + tags + fingerprints in
+  29 s.
 - `TagMap` — Picard schema ↔ container writers, merge with locked fields.
-- `ArtworkScan` — Vision OCR + barcode (port of drtagger `ArtworkScanner` to
-  CGImage).
 
 ### ffmpeg
 `scripts/build-ffmpeg.sh` builds a minimal LGPL ffmpeg (no `--enable-gpl`,
@@ -238,7 +272,9 @@ Responses cached on disk keyed by URL with provider-specific TTLs.
    **Done 2026-09-20** (inspector "Disc" section, `--split-into <folder>`).
 3. SACD ISO reader, DSF extraction, disc text, DST decoding. **Done 2026-09-21.**
 4. Identification pipeline: artwork barcode/OCR, DiscID, tags, fingerprints,
-   voting, confidence; providers MB / Discogs / CAA / fanart / iTunes / Deezer.
+   voting, confidence; providers MB / Discogs / CAA / iTunes / Deezer.
+   **Done 2026-09-21** (fanart.tv client still to add; artwork download and
+   embedding belong to phase 5).
 5. Tag mapping and writers for every container, artwork policy, preview with
    diff and field locks, backups and restore.
 6. ReplayGain, path templates, localisation, signing and notarisation.

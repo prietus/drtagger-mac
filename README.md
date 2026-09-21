@@ -16,6 +16,7 @@ Scope, decisions and delivery phases live in [DESIGN.md](DESIGN.md).
 | `Packages/SplitKit` | ffmpeg driver, verified CUE image splitting to FLAC, CUETools DB CRCs, path templates |
 | `Packages/SACDKit` | Scarletbook (SACD ISO) reader, frame reader, DSF writer, per-track extraction with ID3 tags |
 | `Packages/DSTKit` | DST decoder emitting DSD bits (Swift port of FFmpeg's dstdec.c, LGPL) |
+| `Packages/IdentifyKit` | Release identification: artwork barcodes/OCR, tags, TOC, fingerprints, candidate scoring |
 | `Vendor/ffmpeg` | Minimal LGPL ffmpeg/ffprobe embedded in the app (built, not committed) |
 | `scripts/build-ffmpeg.sh` | Reproducible ffmpeg build (arm64 + x86_64) |
 | `scripts/embed-ffmpeg.sh` | Xcode run-script phase that copies and signs the helpers |
@@ -47,11 +48,14 @@ open .build/DerivedData/Build/Products/Debug/drtagger.app --args --add ~/mactagg
 open .build/DerivedData/Build/Products/Debug/drtagger.app --args --add ~/rips --split-into ~/Music/Library
 # …or extract every SACD ISO (DSD or DST) to DSF:
 open .build/DerivedData/Build/Products/Debug/drtagger.app --args --add ~/isos --extract-into ~/Music/Library
+# …or identify everything in the queue (uses the AcoustID / Discogs keys from Settings):
+open .build/DerivedData/Build/Products/Debug/drtagger.app --args --add ~/rips --identify
 ```
 
 Slow and network tests are opt-in: `DRTAGGER_SLOW_TESTS=1 swift test` in
 `Packages/SplitKit` splits a real rip; `DRTAGGER_NETWORK_TESTS=1 swift test`
-in `Packages/ProviderKit` queries CUETools DB; `DRTAGGER_SLOW_TESTS=1 swift test` in
+in `Packages/ProviderKit` and `Packages/IdentifyKit` queries the real services
+(`DRTAGGER_ACOUSTID_KEY=<key>` additionally enables fingerprint tests); `DRTAGGER_SLOW_TESTS=1 swift test` in
 `Packages/SACDKit` compares a real SACD extraction with sacd_extract's output.
 
 DST decoding is CPU-bound: about 24x realtime per core in Release builds (a

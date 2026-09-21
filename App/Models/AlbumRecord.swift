@@ -1,4 +1,5 @@
 import Foundation
+import IdentifyKit
 import LibraryKit
 import ProviderKit
 import SACDKit
@@ -33,6 +34,9 @@ final class AlbumRecord {
     var ctdbData: Data?
     var splitOutcomeData: Data?
     var sacdOutcomeData: Data?
+    // Phase 4: identification result and the user's pick.
+    var identificationData: Data?
+    var selectedCandidateID: String?
 
     init(detected: DetectedAlbum, issues: [ScanIssue] = []) {
         path = detected.id
@@ -104,6 +108,16 @@ final class AlbumRecord {
     var splitOutcome: SplitOutcome? {
         get { splitOutcomeData.flatMap { try? JSONDecoder().decode(SplitOutcome.self, from: $0) } }
         set { splitOutcomeData = newValue.flatMap { try? JSONEncoder().encode($0) }; updatedAt = Date() }
+    }
+
+    var identification: IdentificationResult? {
+        get { identificationData.flatMap { try? JSONDecoder().decode(IdentificationResult.self, from: $0) } }
+        set { identificationData = newValue.flatMap { try? JSONEncoder().encode($0) }; updatedAt = Date() }
+    }
+
+    var selectedCandidate: ScoredCandidate? {
+        guard let id = selectedCandidateID else { return nil }
+        return identification?.candidates.first { $0.id == id }
     }
 
     // One outcome per extracted area (stereo, multichannel).
