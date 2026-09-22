@@ -108,9 +108,16 @@ struct IdentificationView: View {
         if let c = s.countryHint { parts.append("country \(c)") }
         if let src = s.sourceHint { parts.append("source \(src.rawValue)") }
         if !s.artworkScans.isEmpty { parts.append("\(s.artworkScans.count) scans read") }
-        return Text(parts.isEmpty ? String(localized: "No identifying signals found") : "Signals: " + parts.joined(separator: " · "))
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        var providers: [String] = ["MusicBrainz"]
+        providers.append(result.fingerprints != nil ? "AcoustID" : String(localized: "AcoustID off"))
+        if settings.isDiscogsConfigured { providers.append(result.discogsCandidates.isEmpty ? String(localized: "Discogs (no hits)") : "Discogs \(result.discogsCandidates.count)") }
+        else { providers.append(String(localized: "Discogs off")) }
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(parts.isEmpty ? String(localized: "No identifying signals found") : "Signals: " + parts.joined(separator: " · "))
+            Text("Providers: " + providers.joined(separator: " · "))
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 
     private func candidateList(_ result: IdentificationResult) -> some View {

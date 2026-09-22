@@ -1,4 +1,5 @@
 import SACDKit
+import ProviderKit
 import SplitKit
 import SwiftUI
 
@@ -114,11 +115,17 @@ struct ProvidersSettingsView: View {
             }
             Section("AcoustID (acoustic fingerprints)") {
                 SecureField("Application API key", text: $settings.acoustIDKey)
+                KeyTestRow(enabled: settings.isAcoustIDConfigured) {
+                    await AcoustIDClient(clientKey: settings.acoustIDKey.trimmed, userAgent: IdentifyService.userAgent).validateKey()
+                }
                 Link("Register an application at acoustid.org", destination: URL(string: "https://acoustid.org/new-application")!)
                     .font(.caption)
             }
             Section("Discogs (credits, editions, catalog numbers)") {
                 SecureField("Personal access token", text: $settings.discogsToken)
+                KeyTestRow(enabled: settings.isDiscogsConfigured) {
+                    await DiscogsClient(userAgent: IdentifyService.userAgent, token: settings.discogsToken.trimmed).validateToken()
+                }
                 Text("Use the personal access token from \"Generate new token\" on the developer page, not an application's Consumer Key or Consumer Secret (those are for OAuth apps).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -127,6 +134,9 @@ struct ProvidersSettingsView: View {
             }
             Section("fanart.tv (high-resolution artwork)") {
                 SecureField("Project API key", text: $settings.fanartKey)
+                KeyTestRow(enabled: settings.isFanartConfigured) {
+                    await FanartClient(apiKey: settings.fanartKey.trimmed, userAgent: IdentifyService.userAgent).validateKey()
+                }
                 Link("Request an API key at fanart.tv", destination: URL(string: "https://fanart.tv/get-an-api-key/")!)
                     .font(.caption)
             }
@@ -251,4 +261,38 @@ enum FolderPicker {
 #Preview {
     SettingsView()
         .environment(AppSettings())
+}
+
+// "Test" button next to a key field: asks the service whether it accepts
+// the key and shows the answer in place.
+struct KeyTestRow: View {
+    let enabled: Bool
+    let check: @Sendable () async -> KeyCheck
+    @State private var busy = false
+    @State private var result: KeyCheck?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button("Test") {
+                busy = true
+                result = nil
+                Task {
+                    let r = await check()
+                    await MainActor.run { result = r; busy = false }
+                }
+            }
+            .disabled(!enabled || busy)
+            if busy { ProgressView().controlSize(.small) }
+            if let result {
+                switch result {
+                case .valid(let m): Label(m, systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+                case .invalid(let m): Label(m, systemImage: "xmark.circle.fill").foregroundStyle(.red)
+                case .unreachable(let m): Label(m, systemImage: "wifi.exclamationmark").foregroundStyle(.orange)
+                }
+            } else if !enabled {
+                Text("Enter a key to test it").foregroundStyle(.tertiary)
+            }
+        }
+        .font(.callout)
+    }
 }

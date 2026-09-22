@@ -15,6 +15,7 @@ struct TagPreviewView: View {
     private var members: [AlbumRecord] { library.members(of: record) }
     @State private var showTracks = false
     @State private var showLog = false
+    @State private var viewingCover: ImageViewerItem?
 
     private var chosenID: String? { TagService.chosenCandidate(record)?.id }
     private var hasCandidate: Bool { chosenID != nil }
@@ -64,6 +65,7 @@ struct TagPreviewView: View {
             .padding(4)
         }
         // Picking another release re-runs the preview when one was showing.
+        .sheet(item: $viewingCover) { item in ImageViewerSheet(item: item) }
         .onChange(of: record.selectedCandidateID) { _, _ in
             guard tagging.plan(for: record) != nil, hasCandidate, !tagging.isBusy(record) else { return }
             Task { await tagging.buildPlan(record, members: members, settings: settings) }
@@ -136,11 +138,17 @@ struct TagPreviewView: View {
     private func coverRow(_ plan: TagPlan) -> some View {
         HStack(alignment: .center, spacing: 12) {
             if let cover = plan.cover, let image = NSImage(data: cover.data) {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 64, height: 64)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                Button {
+                    viewingCover = ImageViewerItem(title: cover.option.label, url: cover.option.isLocal ? cover.option.url : nil, data: cover.data, subtitle: cover.option.isLocal ? nil : cover.option.url.host)
+                } label: {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 64, height: 64)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .buttonStyle(.plain)
+                .help("Click to view larger")
             } else {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.secondary.opacity(0.15))

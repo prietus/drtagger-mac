@@ -85,6 +85,9 @@ final class TagService {
     static func targetFiles(_ record: AlbumRecord, members: [AlbumRecord] = []) -> (targets: [(url: URL, disc: Int, track: Int, owner: String)], problem: String?) {
         var out: [(URL, Int, Int, String)] = []
         for m in (members.isEmpty ? [record] : members) {
+            if m.state == .applying {
+                return ([], String(localized: "Disc \(m.discPosition) is still being extracted or split; wait for it to finish."))
+            }
             switch m.kind {
             case .sacdISO:
                 guard !m.sacdOutcomes.isEmpty else { return ([], String(localized: "Extract the SACD first; the DSF tracks receive the tags.")) }

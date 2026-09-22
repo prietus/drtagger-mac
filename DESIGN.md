@@ -344,6 +344,13 @@ Responses cached on disk keyed by URL with provider-specific TTLs.
    `Artist/Album (year)/Disc N/`; "Split/Extract All Discs" runs the whole
    set.
 
+Small things added on request (2026-09-22): a "Test" button next to every
+API key in Settings (AcoustID answers error code 4 for a bad key, Discogs
+`/oauth/identity` names the account, fanart.tv refuses a bad key on any
+request), a "Providers:" line under the identification signals saying what
+ran, and an image viewer sheet for any cover or scan (inspector header,
+artwork strip, chosen cover in Tags), decoded at screen size.
+
 ## 5. Sample files
 
 Source library: NFS mount `~/nfs` (read-only, NAS share):

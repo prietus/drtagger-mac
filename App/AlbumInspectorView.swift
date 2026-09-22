@@ -9,6 +9,7 @@ struct AlbumInspectorView: View {
     let record: AlbumRecord
 
     private var detected: DetectedAlbum? { record.detected }
+    @State private var viewing: ImageViewerItem?
 
     var body: some View {
         ScrollView {
@@ -47,6 +48,7 @@ struct AlbumInspectorView: View {
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .sheet(item: $viewing) { item in ImageViewerSheet(item: item) }
     }
 
     // MARK: Sections
@@ -54,7 +56,11 @@ struct AlbumInspectorView: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 14) {
             if let cover = detected?.artworkFiles.first {
-                ArtworkThumbnail(url: cover, side: 96)
+                Button { viewing = ImageViewerItem(title: cover.lastPathComponent, url: cover, data: nil, subtitle: nil) } label: {
+                    ArtworkThumbnail(url: cover, side: 96)
+                }
+                .buttonStyle(.plain)
+                .help("Click to view larger")
             } else {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(.quaternary)
@@ -257,7 +263,10 @@ struct AlbumInspectorView: View {
                 LazyHStack(spacing: 10) {
                     ForEach(files, id: \.self) { url in
                         VStack(spacing: 4) {
-                            ArtworkThumbnail(url: url, side: 110)
+                            Button { viewing = ImageViewerItem(title: url.lastPathComponent, url: url, data: nil, subtitle: nil) } label: {
+                                ArtworkThumbnail(url: url, side: 110)
+                            }
+                            .buttonStyle(.plain)
                             Text(url.lastPathComponent)
                                 .font(.caption2)
                                 .lineLimit(1)

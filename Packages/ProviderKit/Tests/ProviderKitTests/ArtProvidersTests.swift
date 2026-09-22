@@ -110,3 +110,19 @@ extension ProvidersLiveTests {
         }
     }
 }
+
+@Suite("Key checks (network)") struct KeyCheckTests {
+    static var network: Bool { ProcessInfo.processInfo.environment["DRTAGGER_NETWORK_TESTS"] == "1" }
+    static let ua = "drtagger-mac-tests/0.1 (+https://drtagger.priet.us)"
+
+    @Test func wrongKeysAreRejected() async {
+        guard Self.network else { return }
+        let acoust = await AcoustIDClient(clientKey: "definitely-not-a-key", userAgent: Self.ua).validateKey()
+        if case .invalid = acoust {} else { Issue.record("AcoustID: \(acoust)") }
+        let discogs = await DiscogsClient(userAgent: Self.ua, token: "definitely-not-a-token").validateToken()
+        if case .invalid = discogs {} else { Issue.record("Discogs: \(discogs)") }
+        let fanart = await FanartClient(apiKey: "definitely-not-a-key", userAgent: Self.ua).validateKey()
+        if case .invalid = fanart {} else { Issue.record("fanart.tv: \(fanart)") }
+        #expect(await AcoustIDClient(clientKey: "", userAgent: Self.ua).validateKey() == .invalid("No key entered"))
+    }
+}
