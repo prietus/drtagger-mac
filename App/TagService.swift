@@ -13,6 +13,8 @@ import TagKit
 struct TrackPlan: Identifiable, Sendable, Equatable {
     let url: URL
     let index: Int                       // 0-based album track index
+    let disc: Int                        // 1-based disc position on the release
+    let owner: String                    // path of the record that owns the file
     let existing: TagSet
     let proposed: TagSet
     var result: TagSet
@@ -63,11 +65,13 @@ final class TagService {
     private(set) var activity: [String: Activity] = [:]
     private(set) var errors: [String: String] = [:]
     private(set) var plans: [String: TagPlan] = [:]
+    private var leaders: [String: String] = [:]     // member path → plan key (the set's first record)
 
-    func isBusy(_ record: AlbumRecord) -> Bool { activity[record.path] != nil }
-    func activity(for record: AlbumRecord) -> Activity? { activity[record.path] }
-    func error(for record: AlbumRecord) -> String? { errors[record.path] }
-    func plan(for record: AlbumRecord) -> TagPlan? { plans[record.path] }
+    private func key(_ record: AlbumRecord) -> String { leaders[record.path] ?? record.path }
+    func isBusy(_ record: AlbumRecord) -> Bool { activity[key(record)] != nil }
+    func activity(for record: AlbumRecord) -> Activity? { activity[key(record)] }
+    func error(for record: AlbumRecord) -> String? { errors[key(record)] }
+    func plan(for record: AlbumRecord) -> TagPlan? { plans[key(record)] }
 
     // The release the tags come from: the user's pick, else a confident best.
     static func chosenCandidate(_ record: AlbumRecord) -> Candidate? {
@@ -76,70 +80,95 @@ final class TagService {
         return nil
     }
 
-    // Files that receive the tags, with the album track index each maps to.
-    static func targetFiles(_ record: AlbumRecord) -> (targets: [(url: URL, index: Int)], problem: String?) {
-        let r: (targets: [(url: URL, index: Int)], problem: String?)
-        switch record.kind {
-        case .sacdISO:
-            guard !record.sacdOutcomes.isEmpty else { return ([], String(localized: "Extract the SACD first; the DSF tracks receive the tags.")) }
-            r = (record.sacdOutcomes.flatMap { o in o.tracks.map { ($0.url, $0.number - 1) } }, nil)
-        case .cueImage:
-            guard let split = record.splitOutcome else { return ([], String(localized: "Split the image first; the FLAC tracks receive the tags.")) }
-            r = (split.tracks.filter { $0.number > 0 }.map { ($0.url, $0.number - 1) }, nil)
-        case .cueMultiFile, .trackFolder:
-            guard let detected = record.detected else { return ([], nil) }
-            let files = detected.discs.sorted { $0.number < $1.number }.flatMap { $0.trackFiles.map(\.url) }
-            r = (files.enumerated().map { ($0.element, $0.offset) }, nil)
+    // Files that receive the tags, each with the disc position and track
+    // index it maps to on the release, and the record that owns it.
+    static func targetFiles(_ record: AlbumRecord, members: [AlbumRecord] = []) -> (targets: [(url: URL, disc: Int, track: Int, owner: String)], problem: String?) {
+        var out: [(URL, Int, Int, String)] = []
+        for m in (members.isEmpty ? [record] : members) {
+            switch m.kind {
+            case .sacdISO:
+                guard !m.sacdOutcomes.isEmpty else { return ([], String(localized: "Extract the SACD first; the DSF tracks receive the tags.")) }
+                for o in m.sacdOutcomes { for t in o.tracks { out.append((m.resolved(t.url), m.discPosition, t.number - 1, m.path)) } }
+            case .cueImage:
+                let outcomes = m.splitOutcomes
+                guard !outcomes.isEmpty else { return ([], String(localized: "Split the image first; the FLAC tracks receive the tags.")) }
+                let discNumbers = (m.detected?.discs.count ?? 1) > 1 ? (m.detected?.discs.map(\.number).sorted() ?? []) : [m.discPosition]
+                for (i, o) in outcomes.enumerated() {
+                    let disc = i < discNumbers.count ? discNumbers[i] : i + 1
+                    for t in o.tracks where t.number > 0 { out.append((m.resolved(t.url), disc, t.number - 1, m.path)) }
+                }
+            case .cueMultiFile, .trackFolder:
+                guard let detected = m.detected else { continue }
+                let discs = detected.discs.sorted { $0.number < $1.number }
+                for disc in discs {
+                    let position = discs.count > 1 ? disc.number : m.discPosition
+                    for (i, f) in disc.trackFiles.enumerated() { out.append((m.resolved(f.url), position, i, m.path)) }
+                }
+            }
         }
-        return (r.targets.map { (record.resolved($0.url), $0.index) }, r.problem)
+        return (out.map { (url: $0.0, disc: $0.1, track: $0.2, owner: $0.3) }, nil)
     }
 
-    func buildPlan(_ record: AlbumRecord, settings: AppSettings) async {
+    func buildPlan(_ record: AlbumRecord, members: [AlbumRecord] = [], settings: AppSettings) async {
+        let members = members.isEmpty ? [record] : members
+        let leader = members.first ?? record
+        for m in members { leaders[m.path] = leader.path }
         guard !isBusy(record) else { return }
-        let path = record.path
+        let path = leader.path
         errors[path] = nil
-        guard let candidate = Self.chosenCandidate(record) else {
+        guard let candidate = Self.chosenCandidate(leader) else {
             errors[path] = String(localized: "Choose a release in Identification first.")
             return
         }
-        let (targets, problem) = Self.targetFiles(record)
+        let (targets, problem) = Self.targetFiles(record, members: members)
         if let problem { errors[path] = problem; return }
         guard !targets.isEmpty else { errors[path] = String(localized: "No audio files to tag."); return }
         activity[path] = Activity(message: String(localized: "Reading tags…"), fraction: nil)
         defer { activity[path] = nil }
 
-        let identification = record.identification
+        let identification = leader.identification
         let media = MatchScorer.relevantMedia(candidate, localFormat: identification?.signals.localFormat ?? .unknown)
+        let mediaList = media.isEmpty ? [CandidateMedium(position: 1, tracks: candidate.tracks)] : media
         var context = TagContext()
         context.discogs = identification?.discogsCandidates.first
-        context.musicBrainzDiscID = record.toc?.musicBrainzDiscID
-        context.freedbDiscID = record.toc?.freeDBDiscID
+        context.musicBrainzDiscID = leader.toc?.musicBrainzDiscID
+        context.freedbDiscID = leader.toc?.freeDBDiscID
         context.writeGenres = settings.writeGenresFromDiscogs
         context.acoustIDs = identification?.fingerprints?.acoustIDs ?? [:]
-        let locks = record.tagLocks
+        let locks = leader.tagLocks
         var warnings: [String] = []
-        let releaseTracks = (media.isEmpty ? [CandidateMedium(position: 1, tracks: candidate.tracks)] : media).reduce(0) { $0 + $1.tracks.count }
-        let localTracks = Set(targets.map(\.index)).count
-        if releaseTracks != localTracks {
-            warnings.append(String(localized: "The release lists \(releaseTracks) tracks, the album has \(localTracks); tags are mapped by position."))
+        // Per disc: what the release lists against what the files cover.
+        let localDiscs = Set(targets.map(\.disc)).sorted()
+        for disc in localDiscs {
+            let local = targets.filter { $0.disc == disc }.count
+            if disc > mediaList.count {
+                warnings.append(String(localized: "Disc \(disc): the release has only \(mediaList.count) disc(s); its files are left untouched."))
+            } else if mediaList[disc - 1].tracks.count != local {
+                warnings.append(String(localized: "Disc \(disc): the release lists \(mediaList[disc - 1].tracks.count) tracks, the files are \(local); tags are mapped by position."))
+            }
+        }
+        if mediaList.count > 1 {
+            let missing = (1...mediaList.count).filter { !localDiscs.contains($0) }
+            if !missing.isEmpty { warnings.append(String(localized: "Discs not present: \(missing.map(String.init).joined(separator: ", ")) of \(mediaList.count).")) }
         }
 
-        let reads: [(URL, Int, Result<ContainerContents, any Error>)] = await Task.detached {
-            targets.map { t in (t.url, t.index, Result { try TaggedFile.read(t.url) }) }
+        let reads: [(URL, Int, Int, String, Result<ContainerContents, any Error>)] = await Task.detached {
+            targets.map { t in (t.url, t.disc, t.track, t.owner, Result { try TaggedFile.read(t.url) }) }
         }.value
         var tracks: [TrackPlan] = []
-        for (url, index, read) in reads {
+        var index = 0
+        for (url, disc, track, owner, read) in reads {
             switch read {
             case .failure(let error):
                 warnings.append("\(url.lastPathComponent): \(error.localizedDescription)")
             case .success(let contents):
-                guard let proposed = PicardMapper.trackTags(candidate, media: media, index: index, context: context) else {
-                    warnings.append(String(localized: "\(url.lastPathComponent): the release has no track \(index + 1); left untouched."))
+                guard let proposed = PicardMapper.trackTags(candidate, media: media, disc: disc, track: track, context: context) else {
                     continue
                 }
                 let (result, changes) = TagMerge.merge(existing: contents.tags, proposed: proposed, locked: locks)
-                tracks.append(TrackPlan(url: url, index: index, existing: contents.tags, proposed: proposed, result: result, changes: changes,
+                tracks.append(TrackPlan(url: url, index: index, disc: disc, owner: owner, existing: contents.tags, proposed: proposed, result: result, changes: changes,
                                         existingPictures: contents.pictures.map(PictureInfo.init), audioDigest: contents.audioDigest))
+                index += 1
             }
         }
         guard !tracks.isEmpty else {
@@ -152,9 +181,9 @@ final class TagService {
             activity[path] = Activity(message: String(localized: "Looking for artwork…"), fraction: nil)
             let logBox = LogBox()
             let fetcher = CoverArtFetcher(userAgent: IdentifyService.userAgent, fanartKey: settings.isFanartConfigured ? settings.fanartKey.trimmed : nil)
-            let options = await fetcher.options(for: candidate, discogs: context.discogs, album: record.detected) { logBox.append($0) }
+            let options = await fetcher.options(for: candidate, discogs: context.discogs, album: leader.detected) { logBox.append($0) }
             plan.artworkOptions = options
-            let preferred = record.coverOptionID.flatMap { id in options.first { $0.id == id } }
+            let preferred = leader.coverOptionID.flatMap { id in options.first { $0.id == id } }
             for option in ([preferred].compactMap { $0 } + options) {
                 if let art = await fetcher.fetch(option) {
                     plan.cover = art
@@ -170,41 +199,45 @@ final class TagService {
 
     // nil keeps the files' own pictures.
     func chooseCover(_ optionID: String?, for record: AlbumRecord, settings: AppSettings) async {
-        guard var plan = plans[record.path] else { return }
+        let path = key(record)
+        guard var plan = plans[path] else { return }
         guard let optionID, let option = plan.artworkOptions.first(where: { $0.id == optionID }) else {
-            plan.cover = nil; plan.coverOptionID = nil; plans[record.path] = plan
+            plan.cover = nil; plan.coverOptionID = nil; plans[path] = plan
             return
         }
-        activity[record.path] = Activity(message: String(localized: "Downloading artwork…"), fraction: nil)
-        defer { activity[record.path] = nil }
+        activity[path] = Activity(message: String(localized: "Downloading artwork…"), fraction: nil)
+        defer { activity[path] = nil }
         if let art = await CoverArtFetcher(userAgent: IdentifyService.userAgent, fanartKey: settings.isFanartConfigured ? settings.fanartKey.trimmed : nil).fetch(option) {
             plan.cover = art; plan.coverOptionID = optionID
         } else {
             plan.warnings.append(String(localized: "\(option.label): could not be downloaded."))
         }
-        plans[record.path] = plan
+        plans[path] = plan
     }
 
-    func toggleLock(_ name: String, for record: AlbumRecord) {
+    func toggleLock(_ name: String, for record: AlbumRecord, members: [AlbumRecord] = []) {
         var locks = record.tagLocks
         if locks.contains(name) { locks.remove(name) } else { locks.insert(name) }
-        record.tagLocks = locks
-        guard var plan = plans[record.path] else { return }
+        for m in (members.isEmpty ? [record] : members) { m.tagLocks = locks }
+        let path = key(record)
+        guard var plan = plans[path] else { return }
         plan.tracks = plan.tracks.map { t in
             var t = t
             (t.result, t.changes) = TagMerge.merge(existing: t.existing, proposed: t.proposed, locked: locks)
             return t
         }
-        plans[record.path] = plan
+        plans[path] = plan
         try? record.modelContext?.save()
     }
 
-    func apply(_ record: AlbumRecord, settings: AppSettings) async {
-        guard !isBusy(record), let plan = plans[record.path] else { return }
-        let path = record.path
+    func apply(_ record: AlbumRecord, members: [AlbumRecord] = [], settings: AppSettings) async {
+        let members = members.isEmpty ? [record] : members
+        let leader = members.first ?? record
+        let path = key(record)
+        guard !isBusy(record), let plan = plans[path] else { return }
         errors[path] = nil
         activity[path] = Activity(message: String(localized: "Writing tags…"), fraction: 0)
-        record.state = .applying
+        for m in members { m.state = .applying }
         let embed: Picture? = plan.cover.flatMap { try? ArtworkProcessor.prepared(from: $0.data, maxPixels: settings.embedCoverMaxPixels) }
         let coverData = settings.saveCoverFile ? plan.cover?.data : nil
         let coverExtension = plan.cover.map { ArtworkProcessor.mimeType(of: $0.data) == "image/png" ? "png" : "jpg" } ?? "jpg"
@@ -219,7 +252,7 @@ final class TagService {
                 let album = try await analyzer.analyzeAlbum(work.map(\.url)) { [weak self] done, total in
                     Task { @MainActor in self?.activity[path] = Activity(message: String(localized: "Measuring loudness…"), fraction: Double(done) / Double(total)) }
                 }
-                let locks = record.tagLocks
+                let locks = leader.tagLocks
                 for i in work.indices where i < album.tracks.count {
                     let container = TagContainer.from(url: work[i].url)
                     let dsd = container == .dsf || container == .dff
@@ -257,7 +290,12 @@ final class TagService {
             return (backups, reports, problems)
         }.value
         problems.append(contentsOf: outcome.problems)
-        var backups = record.tagBackups.isEmpty ? outcome.backups : record.tagBackups
+        // Every file belongs to one member; backups, reports and moves stay with it.
+        let ownerOf = Dictionary(work.map { ($0.url.path, $0.owner) }, uniquingKeysWith: { a, _ in a })
+        var backupsByOwner: [String: [TagBackup]] = [:]
+        for b in outcome.backups { backupsByOwner[ownerOf[b.path] ?? leader.path, default: []].append(b) }
+        var reportsByOwner: [String: [TagWriteReport]] = [:]
+        for r in outcome.reports { reportsByOwner[ownerOf[r.path] ?? leader.path, default: []].append(r) }
         var reports = outcome.reports
 
         // 2. Library layout from the final tags.
@@ -272,15 +310,21 @@ final class TagService {
                 activity[path] = Activity(message: String(localized: "Organizing files…"), fraction: nil)
                 do {
                     let moved = try await Task.detached { try LibraryOrganizer.perform(planned) }.value
-                    var map = record.fileMoves
+                    var map: [String: String] = [:]
                     for m in moved { map[m.from.path] = m.to.path }
-                    record.fileMoves = map
-                    backups = backups.map { b in map[b.path].map { b.moved(to: $0) } ?? b }
+                    for m in members {
+                        let mine = map.filter { ownerOf[$0.key] == m.path || (ownerOf[$0.key] == nil && m.path == leader.path) }
+                        var moves = m.fileMoves
+                        for (from, to) in mine { moves[from] = to }
+                        m.fileMoves = moves
+                    }
+                    for (owner, list) in backupsByOwner { backupsByOwner[owner] = list.map { b in map[b.path].map { b.moved(to: $0) } ?? b } }
+                    for (owner, list) in reportsByOwner { reportsByOwner[owner] = list.map { r in map[r.path].map { r.moved(to: $0) } ?? r } }
                     reports = reports.map { r in map[r.path].map { r.moved(to: $0) } ?? r }
                     // A loose folder that moved as a whole is now the album's home.
-                    let folders = Set(reports.map { URL(fileURLWithPath: $0.path).deletingLastPathComponent().path })
-                    if record.kind == .trackFolder || record.kind == .cueMultiFile, folders.count == 1, let folder = folders.first, folder != record.path {
-                        record.path = folder
+                    for m in members where m.kind == .trackFolder || m.kind == .cueMultiFile {
+                        let folders = Set((reportsByOwner[m.path] ?? []).map { URL(fileURLWithPath: $0.path).deletingLastPathComponent().path })
+                        if folders.count == 1, let folder = folders.first, folder != m.path { m.path = folder }
                     }
                 } catch {
                     problems.append(String(localized: "Could not move files into the library: \(error.localizedDescription)"))
@@ -289,28 +333,31 @@ final class TagService {
         }
 
         // The first backups are the true originals; later applies keep them.
-        record.tagBackups = backups
-        record.tagReports = reports
-        record.taggedAt = Date()
-        record.coverOptionID = plan.coverOptionID
-        if problems.isEmpty {
-            record.state = .done
-            record.errorMessage = nil
-        } else {
-            record.state = reports.isEmpty ? .error : .done
-            record.errorMessage = problems.joined(separator: "\n")
-            errors[path] = problems.first
+        for m in members {
+            if m.tagBackups.isEmpty { m.tagBackups = backupsByOwner[m.path] ?? [] }
+            m.tagReports = reportsByOwner[m.path] ?? []
+            m.taggedAt = Date()
+            m.coverOptionID = plan.coverOptionID
+            if problems.isEmpty {
+                m.state = .done
+                m.errorMessage = nil
+            } else {
+                m.state = reports.isEmpty ? .error : .done
+                m.errorMessage = problems.joined(separator: "\n")
+            }
         }
+        if !problems.isEmpty { errors[path] = problems.first }
         plans[path] = nil
         activity[path] = nil
         try? record.modelContext?.save()
     }
 
-    func restore(_ record: AlbumRecord) async {
+    func restore(_ record: AlbumRecord, members: [AlbumRecord] = []) async {
+        let members = members.isEmpty ? [record] : members
         guard !isBusy(record) else { return }
-        let backups = record.tagBackups
+        let backups = members.flatMap(\.tagBackups)
         guard !backups.isEmpty else { return }
-        let path = record.path
+        let path = key(record)
         activity[path] = Activity(message: String(localized: "Restoring original tags…"), fraction: nil)
         errors[path] = nil
         let problems: [String] = await Task.detached {
@@ -322,11 +369,13 @@ final class TagService {
             return problems
         }.value
         if problems.isEmpty {
-            record.tagBackups = []
-            record.tagReports = []
-            record.taggedAt = nil
-            record.errorMessage = nil
-            record.state = record.selectedCandidateID != nil ? .needsReview : .scanned
+            for m in members {
+                m.tagBackups = []
+                m.tagReports = []
+                m.taggedAt = nil
+                m.errorMessage = nil
+                m.state = m.selectedCandidateID != nil ? .needsReview : .scanned
+            }
         } else {
             errors[path] = problems.joined(separator: "\n")
         }

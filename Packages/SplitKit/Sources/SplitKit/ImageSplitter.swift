@@ -8,6 +8,9 @@ public struct SplitOptions: Sendable, Equatable {
     public var albumFolderTemplate: String = PathTemplate.defaultAlbumFolder
     public var trackFileTemplate: String = PathTemplate.defaultTrackFile
     public var asciiFileNames: Bool = false
+    // A rendered relative album folder (e.g. "Led Zeppelin/Box Set (1990)/Disc 2")
+    // that replaces the one derived from the CUE: set members share it.
+    public var albumFolderOverride: String? = nil
     public var writeProvisionalTags: Bool = true
     public var overwriteExisting: Bool = false
 
@@ -169,6 +172,7 @@ public actor ImageSplitter {
         if let total = album.discTotal, total > 1, let n = album.discNumber {
             relative += "/Disc \(n)"
         }
+        if let override = options.albumFolderOverride, !override.isEmpty { relative = override }
         let outputFolder = relative.isEmpty ? destinationRoot : destinationRoot.appending(path: relative, directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: outputFolder, withIntermediateDirectories: true)
 

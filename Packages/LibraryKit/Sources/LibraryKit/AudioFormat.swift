@@ -101,6 +101,40 @@ public enum FileRules {
     }
 
     // "CD1", "Disc 2", "Disco 3 - Live", "disk_4" … Returns the disc number.
+    // "Box Set (Disc 2).cue", "Cancioneros (disc 1-3).iso", "CD2", "Disc 2 of 4":
+    // the disc number anywhere in a file or folder name, with the total when
+    // the name states it. Volumes are not discs ("Cantatas Vol. 40" is an album).
+    private static let discTokenPattern = try! NSRegularExpression(
+        pattern: #"(?:^|[\s\(\[_\-.])(?:cd|disc|disco|disk|dvd)\s*[-_.#]?\s*(\d{1,2})(?:\s*(?:of|de|-|/)\s*(\d{1,2}))?(?=$|[\s\)\]_\-.,])"#,
+        options: [.caseInsensitive])
+
+    public static func discNumber(fromFileName name: String) -> (number: Int, total: Int?)? {
+        let base = (name as NSString).deletingPathExtension
+        let range = NSRange(base.startIndex..., in: base)
+        guard let m = discTokenPattern.firstMatch(in: base, range: range), let n = Range(m.range(at: 1), in: base), let number = Int(base[n]) else { return nil }
+        let total = Range(m.range(at: 2), in: base).flatMap { Int(base[$0]) }
+        return (number, total)
+    }
+
+    // The name without its disc token, so siblings of one set compare equal:
+    // "Led Zeppelin - Box Set (Disc 2)" → "Led Zeppelin - Box Set".
+    public static func strippingDiscToken(_ name: String) -> String {
+        let base = (name as NSString).deletingPathExtension
+        let range = NSRange(base.startIndex..., in: base)
+        guard let m = discTokenPattern.firstMatch(in: base, range: range), var r = Range(m.range, in: base) else { return base }
+        var t = base
+        // The token's own brackets go with it: "(Disc 2)" → "".
+        if let first = base[r].first, first == "(" || first == "[" {
+            var end = r.upperBound
+            while end < base.endIndex, base[end] == " " { end = base.index(after: end) }
+            if end < base.endIndex, base[end] == ")" || base[end] == "]" { r = r.lowerBound..<base.index(after: end) }
+        }
+        t.removeSubrange(r)
+        t = t.replacingOccurrences(of: #"\(\s*\)|\[\s*\]"#, with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
+        return t.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: "-_.,")))
+    }
+
     public static func discNumber(fromFolderName name: String) -> Int? {
         let pattern = #"^(?:cd|disc|disco|disk|dvd)\s*[-_.#]?\s*(\d{1,2})\b"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return nil }

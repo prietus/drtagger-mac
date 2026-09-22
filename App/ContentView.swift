@@ -130,8 +130,8 @@ extension ContentView {
     // `--identify` runs identification on every album in the store.
     func identifyFromLaunchArguments(_ arguments: [String] = CommandLine.arguments) async {
         guard arguments.contains("--identify") else { return }
-        for record in library.allRecords() {
-            await identify.identify(record, settings: settings)
+        for record in library.allRecords() where library.isLeader(record) {
+            await identify.identify(record, members: library.members(of: record), settings: settings)
             // One line per album on stderr so scripts can read the verdict.
             let verdict: String
             if let r = record.identification, let best = r.best {
@@ -149,11 +149,12 @@ extension ContentView {
     // `--tag` previews and writes tags for every album with a chosen release.
     func tagFromLaunchArguments(_ arguments: [String] = CommandLine.arguments) async {
         guard arguments.contains("--tag") else { return }
-        for record in library.allRecords() {
-            await tagging.buildPlan(record, settings: settings)
+        for record in library.allRecords() where library.isLeader(record) {
+            let members = library.members(of: record)
+            await tagging.buildPlan(record, members: members, settings: settings)
             let verdict: String
             if tagging.plan(for: record) != nil {
-                await tagging.apply(record, settings: settings)
+                await tagging.apply(record, members: members, settings: settings)
                 verdict = "\(record.tagReports.count) file(s) written, state \(record.state.rawValue)" + (record.errorMessage.map { " – \($0)" } ?? "")
             } else {
                 verdict = "no plan: " + (tagging.error(for: record) ?? "unknown")
@@ -191,6 +192,13 @@ struct QueueSidebar: View {
                         }
                         Button("Show in Finder") {
                             NSWorkspace.shared.activateFileViewerSelecting([record.url])
+                        }
+                        let siblings = library.siblingCandidates(of: record)
+                        if record.setID == nil, !siblings.isEmpty {
+                            Button("Group with \(siblings.count) Folder Sibling(s)") { library.group([record] + siblings) }
+                        }
+                        if record.setID != nil {
+                            Button("Ungroup Release Set") { library.ungroup(record) }
                         }
                         Divider()
                         Button("Remove from Queue", role: .destructive) {
@@ -285,6 +293,14 @@ struct QueueRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
+            if let p = record.setPosition {
+                Text("Disc \(p)/\(record.setTotal ?? p)")
+                    .font(.caption2)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Color.secondary.opacity(0.15), in: Capsule())
+                    .foregroundStyle(.secondary)
+            }
             Image(systemName: record.state.systemImage)
                 .foregroundStyle(stateColor)
                 .help(record.state.label)

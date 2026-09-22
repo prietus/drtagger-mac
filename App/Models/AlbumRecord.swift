@@ -47,6 +47,11 @@ final class AlbumRecord {
     var coverOptionID: String?
     // Phase 6: where the organizer moved files (old path → new path).
     var fileMovesData: Data?
+    // Phase 7: release sets (several records that are one multi-disc release).
+    var setID: String?
+    var setPosition: Int?
+    var setTotal: Int?
+    var setTitle: String?
 
     init(detected: DetectedAlbum, issues: [ScanIssue] = []) {
         path = detected.id
@@ -115,10 +120,21 @@ final class AlbumRecord {
         set { ctdbData = newValue.flatMap { try? JSONEncoder().encode($0) }; updatedAt = Date() }
     }
 
-    var splitOutcome: SplitOutcome? {
-        get { splitOutcomeData.flatMap { try? JSONDecoder().decode(SplitOutcome.self, from: $0) } }
-        set { splitOutcomeData = newValue.flatMap { try? JSONEncoder().encode($0) }; updatedAt = Date() }
+    // One outcome per split disc (stores written before phase 7 hold a single object).
+    var splitOutcomes: [SplitOutcome] {
+        get {
+            guard let data = splitOutcomeData else { return [] }
+            if let list = try? JSONDecoder().decode([SplitOutcome].self, from: data) { return list }
+            return (try? JSONDecoder().decode(SplitOutcome.self, from: data)).map { [$0] } ?? []
+        }
+        set { splitOutcomeData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue); updatedAt = Date() }
     }
+
+    var splitOutcome: SplitOutcome? { splitOutcomes.first }
+
+    // The disc position this record's files cover: its set position, else
+    // the "disc 2 of 3" evidence in its own name, else 1.
+    var discPosition: Int { setPosition ?? detected?.discPosition?.number ?? 1 }
 
     var identification: IdentificationResult? {
         get { identificationData.flatMap { try? JSONDecoder().decode(IdentificationResult.self, from: $0) } }

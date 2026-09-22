@@ -16,6 +16,7 @@ struct AlbumInspectorView: View {
                 header
                 if let detected {
                     overview(detected)
+                    ReleaseSetView(record: record)
                     IdentificationView(record: record)
                     TagPreviewView(record: record)
                     if record.isSplittable {

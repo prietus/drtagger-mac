@@ -76,7 +76,30 @@ public actor Identifier {
         var options = SignalCollector.Options()
         options.scanArtwork = config.scanArtwork
         let signals = await SignalCollector(tool: tool).collect(album: album, toc: toc, ctdb: ctdb, options: options, log: log)
-        log("Signals: \(signals.uniqueBarcodes.count) barcode(s), \(signals.uniqueCatalogNumbers.count) catalog number(s), \(signals.uniqueReleaseIDs.count) MBID(s), disc ID \(signals.discID ?? "none"), \(signals.trackCount) track(s).")
+        return await pipeline(signals: signals, started: started, logBox: logBox, progress: progress)
+    }
+
+    // Several albums that are one release: every disc's signals, matched
+    // medium by medium.
+    public func identify(
+        set members: [SignalCollector.SetMember],
+        declaredTotal: Int? = nil,
+        ctdb: [CUEToolsDBClient.Metadata] = [],
+        progress: @escaping @Sendable (IdentifyProgress) -> Void = { _ in }
+    ) async -> IdentificationResult {
+        let started = Date()
+        let logBox = LogBox()
+        let log: @Sendable (String) -> Void = { logBox.append($0) }
+        progress(IdentifyProgress(fraction: 0.05, message: "Reading signals of \(members.count) discs"))
+        var options = SignalCollector.Options()
+        options.scanArtwork = config.scanArtwork
+        let signals = await SignalCollector(tool: tool).collect(set: members, declaredTotal: declaredTotal, ctdb: ctdb, options: options, log: log)
+        return await pipeline(signals: signals, started: started, logBox: logBox, progress: progress)
+    }
+
+    private func pipeline(signals: AlbumSignals, started: Date, logBox: LogBox, progress: @escaping @Sendable (IdentifyProgress) -> Void) async -> IdentificationResult {
+        let log: @Sendable (String) -> Void = { logBox.append($0) }
+        log("Signals: \(signals.uniqueBarcodes.count) barcode(s), \(signals.uniqueCatalogNumbers.count) catalog number(s), \(signals.uniqueReleaseIDs.count) MBID(s), disc ID \(signals.discID ?? "none"), \(signals.trackCount) track(s)\(signals.isSet ? ", discs \(signals.presentDiscs.map(String.init).joined(separator: ",")) of \(signals.discCount)" : "").")
 
         // Candidate pool keyed by MBID, remembering how each one got in.
         var pool: [String: Candidate] = [:]
@@ -100,12 +123,14 @@ public actor Identifier {
             }
         }
 
-        // 2. Disc ID / TOC.
-        if let discID = signals.discID {
-            progress(IdentifyProgress(fraction: 0.2, message: "Looking up disc ID"))
-            if let releases = try? await musicBrainz.lookupDiscID(discID, toc: signals.tocString) {
+        // 2. Disc ID / TOC, one lookup per local disc.
+        var lookups: [(Int, String, String?)] = signals.discIDs.keys.sorted().map { ($0, signals.discIDs[$0]!, signals.tocStrings[$0]) }
+        if lookups.isEmpty, let discID = signals.discID { lookups = [(1, discID, signals.tocString)] }
+        for (position, discID, toc) in lookups.prefix(4) {
+            progress(IdentifyProgress(fraction: 0.2, message: lookups.count > 1 ? "Looking up disc \(position) ID" : "Looking up disc ID"))
+            if let releases = try? await musicBrainz.lookupDiscID(discID, toc: toc) {
                 for r in releases { add(r, r.allDiscIDs.contains(discID) ? .discID : .tocMatch) }
-                log("MusicBrainz TOC lookup: \(releases.count) release(s).")
+                log("MusicBrainz TOC lookup (disc \(position)): \(releases.count) release(s).")
             }
         }
 
@@ -123,7 +148,7 @@ public actor Identifier {
         for catno in signals.uniqueCatalogNumbers.prefix(4) {
             do {
                 let rs = try await musicBrainz.searchByCatalog(catno, limit: 8)
-                let plausible = rs.filter { signals.trackCount == 0 || $0.trackCount == nil || $0.plausibleTrackCounts.contains(signals.trackCount) }
+                let plausible = rs.filter { signals.isSet || signals.trackCount == 0 || $0.trackCount == nil || $0.plausibleTrackCounts.contains(signals.trackCount) }
                 for r in plausible { add(r, .catalogNumber) }
                 log("Catalog \(catno): \(rs.count) release(s), \(plausible.count) with a plausible track count.")
             } catch {

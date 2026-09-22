@@ -326,6 +326,24 @@ Responses cached on disk keyed by URL with provider-specific TTLs.
    staple; needs a `drtagger-notary` keychain profile) with secure
    timestamps on the app and the ffmpeg helpers.
 
+7. Multi-disc release sets. **Done 2026-09-22.** Several images with
+   "(Disc N)" names in one folder scan as one multi-disc album; separate
+   albums that are one release (SACD ISOs whose master TOC says "disc N of
+   M" with the same album title, sibling folders "CD1"/"Disc 2"…) are
+   grouped automatically into a *release set* after a scan, and can be
+   grouped, ungrouped and reordered by hand (sidebar context menu, inspector
+   "Release set" section). A set is identified once: every disc's signals
+   merged, one TOC lookup per disc, candidates matched medium by medium
+   (`MatchScorer.pairedMedia`), so a lone "disc 2 of 3" matches medium 2 of
+   the box without a track-count penalty, incomplete sets are allowed with a
+   warning, and the box release wins over single-disc releases (which stay
+   visible). Tags come from the medium at each disc's position (ALBUM is
+   the release title, DISCNUMBER/DISCTOTAL from the release, DISCSUBTITLE the
+   medium title); Apply writes every disc, backups and reports stay with the
+   record that owns each file. Split and extract process every disc into
+   `Artist/Album (year)/Disc N/`; "Split/Extract All Discs" runs the whole
+   set.
+
 ## 5. Sample files
 
 Source library: NFS mount `~/nfs` (read-only, NAS share):

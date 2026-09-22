@@ -152,11 +152,14 @@ struct DiscIdentityView: View {
     private var splitRows: some View {
         HStack(spacing: 10) {
             Text("Split").font(.callout).foregroundStyle(.secondary)
-            if let outcome = record.splitOutcome {
-                Label(outcome.verified ? "\(outcome.tracks.count) tracks written and verified" : "Split finished with problems",
-                      systemImage: outcome.verified ? "checkmark.circle.fill" : "exclamationmark.triangle")
+            if !record.splitOutcomes.isEmpty {
+                let outcomes = record.splitOutcomes
+                let ok = outcomes.allSatisfy(\.verified)
+                let count = outcomes.reduce(0) { $0 + $1.tracks.count }
+                Label(ok ? (outcomes.count > 1 ? "\(count) tracks on \(outcomes.count) discs written and verified" : "\(count) tracks written and verified") : "Split finished with problems",
+                      systemImage: ok ? "checkmark.circle.fill" : "exclamationmark.triangle")
                     .font(.callout)
-                    .foregroundStyle(outcome.verified ? .green : .orange)
+                    .foregroundStyle(ok ? .green : .orange)
             } else {
                 Text("Not split yet").font(.callout).foregroundStyle(.tertiary)
             }
@@ -166,7 +169,7 @@ struct DiscIdentityView: View {
             }
             .disabled(disc.isBusy(record))
         }
-        if let outcome = record.splitOutcome {
+        ForEach(Array(record.splitOutcomes.enumerated()), id: \.offset) { _, outcome in
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(outcome.outputFolder.path)

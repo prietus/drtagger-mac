@@ -17,6 +17,9 @@ public struct SACDExtractOptions: Sendable, Equatable {
     public var albumFolderTemplate: String = PathTemplate.defaultAlbumFolder
     public var trackFileTemplate: String = PathTemplate.defaultTrackFile
     public var asciiFileNames: Bool = false
+    // A rendered relative album folder (including its "Disc N") that replaces
+    // the one derived from the disc text: members of a set share it.
+    public var albumFolderOverride: String? = nil
     public var multichannelSubfolder: String = "Multichannel"
     public var writeTags: Bool = true
     public var overwriteExisting: Bool = false
@@ -101,6 +104,7 @@ public struct SACDExtractor: Sendable {
         if disc.info.albumSetSize > 1 {
             relative += "/Disc \(disc.info.albumSequenceNumber)"
         }
+        if let override = options.albumFolderOverride, !override.isEmpty { relative = override }
         if area.isMultichannel, !options.multichannelSubfolder.isEmpty {
             relative += "/" + PathTemplate.sanitizeComponent(options.multichannelSubfolder)
         }

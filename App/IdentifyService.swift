@@ -27,16 +27,17 @@ final class IdentifyService {
     func activity(for record: AlbumRecord) -> Activity? { activity[record.path] }
     func error(for record: AlbumRecord) -> String? { errors[record.path] }
 
-    func identify(_ record: AlbumRecord, settings: AppSettings) async {
+    func identify(_ record: AlbumRecord, members: [AlbumRecord] = [], settings: AppSettings) async {
+        let members = members.isEmpty ? [record] : members
         guard !isBusy(record), let album = record.detected else { return }
         guard let location = settings.ffmpegLocator.locate(), let probe = location.ffprobe else {
             errors[record.path] = FFmpegLocator.LocateError.notFound.localizedDescription
             return
         }
         let path = record.path
-        activity[path] = Activity(message: String(localized: "Starting…"), fraction: 0)
-        errors[path] = nil
-        record.state = .identifying
+        let paths = members.map(\.path)
+        for p in paths { activity[p] = Activity(message: String(localized: "Starting…"), fraction: 0); errors[p] = nil }
+        for m in members { m.state = .identifying }
 
         // Keys come from Settings (Keychain); scripts can pass them on the
         // command line instead so a fresh build never triggers a Keychain
@@ -49,20 +50,37 @@ final class IdentifyService {
         let toc = record.toc
         let ctdb = record.ctdbReport?.metadata ?? []
 
-        let result = await identifier.identify(album: album, toc: toc, ctdb: ctdb) { [weak self] p in
+        let progress: @Sendable (IdentifyProgress) -> Void = { [weak self] p in
             Task { @MainActor in
-                self?.activity[path] = Activity(message: p.message, fraction: p.fraction)
+                for path in paths { self?.activity[path] = Activity(message: p.message, fraction: p.fraction) }
             }
         }
-        record.identification = result
-        if result.isConfident, let best = result.best {
-            record.selectedCandidateID = best.id
-            record.state = .confident
+        let result: IdentificationResult
+        if members.count > 1 {
+            // A release set: every disc's signals, matched medium by medium.
+            let setMembers = members.compactMap { m -> SignalCollector.SetMember? in
+                m.detected.map { SignalCollector.SetMember(album: $0, position: m.setPosition ?? 1, toc: m.toc) }
+            }
+            result = await identifier.identify(set: setMembers, declaredTotal: members.first?.setTotal, ctdb: ctdb, progress: progress)
         } else {
-            record.selectedCandidateID = result.best.flatMap { $0.confidence >= .likely ? $0.id : nil }
-            record.state = result.candidates.isEmpty ? .scanned : .needsReview
+            result = await identifier.identify(album: album, toc: toc, ctdb: ctdb, progress: progress)
         }
-        activity[path] = nil
+        let selected: String?
+        let state: AlbumState
+        if result.isConfident, let best = result.best {
+            selected = best.id
+            state = .confident
+        } else {
+            selected = result.best.flatMap { $0.confidence >= .likely ? $0.id : nil }
+            state = result.candidates.isEmpty ? .scanned : .needsReview
+        }
+        for m in members {
+            m.identification = result
+            m.selectedCandidateID = selected
+            m.state = state
+        }
+        for p in paths { activity[p] = nil }
+        _ = path
         try? record.modelContext?.save()
     }
 
@@ -71,9 +89,11 @@ final class IdentifyService {
         return arguments[i + 1]
     }
 
-    func select(_ candidate: ScoredCandidate?, for record: AlbumRecord) {
-        record.selectedCandidateID = candidate?.id
-        if candidate != nil, record.state == .scanned { record.state = .needsReview }
+    func select(_ candidate: ScoredCandidate?, for record: AlbumRecord, members: [AlbumRecord] = []) {
+        for m in (members.isEmpty ? [record] : members) {
+            m.selectedCandidateID = candidate?.id
+            if candidate != nil, m.state == .scanned { m.state = .needsReview }
+        }
         try? record.modelContext?.save()
     }
 }

@@ -8,7 +8,10 @@ struct IdentificationView: View {
     let record: AlbumRecord
     @Environment(IdentifyService.self) private var identify
     @Environment(AppSettings.self) private var settings
+    @Environment(LibraryController.self) private var library
     @State private var showLog = false
+
+    private var members: [AlbumRecord] { library.members(of: record) }
     @State private var onlyPlausibleFormats: Bool? = nil   // nil: default for the album kind
     @State private var showOtherFormats = false
 
@@ -82,8 +85,11 @@ struct IdentificationView: View {
                     .font(.caption)
                     .help("Fold away releases whose medium cannot be the source of these files")
             }
+            if members.count > 1 {
+                Text("Release set · \(members.count) discs").font(.caption).foregroundStyle(.secondary)
+            }
             Button(record.identification == nil ? "Identify" : "Identify Again") {
-                Task { await identify.identify(record, settings: settings) }
+                Task { await identify.identify(record, members: members, settings: settings) }
             }
             .disabled(identify.isBusy(record))
         }
@@ -121,7 +127,7 @@ struct IdentificationView: View {
             }
             ForEach(shown.prefix(12)) { scored in
                 CandidateRow(scored: scored, selected: record.selectedCandidateID == scored.id) {
-                    identify.select(record.selectedCandidateID == scored.id ? nil : scored, for: record)
+                    identify.select(record.selectedCandidateID == scored.id ? nil : scored, for: record, members: members)
                 }
             }
             if shown.count > 12 {
@@ -134,7 +140,7 @@ struct IdentificationView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(folded.prefix(12)) { scored in
                             CandidateRow(scored: scored, selected: record.selectedCandidateID == scored.id) {
-                                identify.select(record.selectedCandidateID == scored.id ? nil : scored, for: record)
+                                identify.select(record.selectedCandidateID == scored.id ? nil : scored, for: record, members: members)
                             }
                         }
                     }

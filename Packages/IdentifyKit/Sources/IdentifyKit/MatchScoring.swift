@@ -83,7 +83,10 @@ public enum MatchScorer {
         // Media: a hybrid SACD is listed as two "layers" of one disc; only the
         // layer the local files can come from counts.
         let media = relevantMedia(candidate, localFormat: signals.localFormat)
-        let candidateTracks = media.isEmpty ? candidate.tracks : media.flatMap(\.tracks)
+        // Sets: only the media at the local disc positions count.
+        let paired = pairedMedia(media, signals: signals)
+        let candidateTracks = media.isEmpty ? candidate.tracks : paired.flatMap(\.tracks)
+        let missingDiscs = media.isEmpty ? [] : signals.presentDiscs.filter { $0 > media.count }
 
         // Format plausibility.
         let formatText = (media.compactMap(\.format) + [candidate.mediaFormat ?? ""]).joined(separator: " ").lowercased()
@@ -126,7 +129,15 @@ public enum MatchScorer {
 
         // Track count: total and, for multi-disc albums, per medium.
         let localCount = signals.trackCount
-        let candidateCount = candidateTracks.isEmpty ? candidate.trackCount : candidateTracks.count
+        let candidateCount: Int? = {
+            if !candidateTracks.isEmpty { return candidateTracks.count }
+            if signals.isSet {
+                // Search results carry per-medium counts but no tracks.
+                let counts = paired.map(\.trackCount)
+                return counts.allSatisfy { $0 != nil } && !counts.isEmpty ? counts.compactMap { $0 }.reduce(0, +) : nil
+            }
+            return candidate.trackCount
+        }()
         var trackCountMatches: Bool? = nil
         if localCount > 0, let candidateCount {
             trackCountMatches = candidateCount == localCount
@@ -141,6 +152,10 @@ public enum MatchScorer {
         if signals.discCount > 1, !media.isEmpty {
             if media.count == signals.discCount { score += 5; reasons.append("\(signals.discCount) discs") }
             else { score -= 15; reasons.append("Disc count differs (\(media.count) vs \(signals.discCount))") }
+        }
+        if !missingDiscs.isEmpty {
+            score -= 30
+            reasons.append("Release has no disc \(missingDiscs.map(String.init).joined(separator: ", "))")
         }
 
         // Durations.
@@ -172,9 +187,10 @@ public enum MatchScorer {
             score += 30; strong += 1
             reasons.append("Catalog number \(hit) matches")
         }
-        if let discID = signals.discID, candidate.allDiscIDs.contains(discID) {
-            score += 45; strong += 1
-            reasons.append("Disc ID matches")
+        let discIDHits = signals.allDiscIDs.intersection(candidate.allDiscIDs)
+        if !discIDHits.isEmpty {
+            score += 45 + 5 * Double(discIDHits.count - 1); strong += 1
+            reasons.append(discIDHits.count > 1 ? "Disc IDs match for \(discIDHits.count) discs" : "Disc ID matches")
         } else if origins.contains(.tocMatch) {
             score += 25; strong += 1
             reasons.append("CD TOC matches (MusicBrainz)")
@@ -282,6 +298,13 @@ public enum MatchScorer {
         case .unknown:
             return .unknown
         }
+    }
+
+    // Media at the local disc positions, in local order. A plain album
+    // covers every medium; a set member covers medium N only.
+    public static func pairedMedia(_ media: [CandidateMedium], signals: AlbumSignals) -> [CandidateMedium] {
+        guard signals.isSet else { return media }
+        return signals.presentDiscs.compactMap { p in p >= 1 && p <= media.count ? media[p - 1] : nil }
     }
 
     // Hybrid SACDs (and CD+DVD sets) list one medium per layer; pick the

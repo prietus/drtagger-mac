@@ -78,6 +78,17 @@ public enum PicardMapper {
         return nil
     }
 
+    // Tags for track `track` (0-based) of the medium at 1-based position
+    // `disc` among `media`: what a set member's files map to.
+    public static func trackTags(_ c: Candidate, media: [CandidateMedium], disc: Int, track: Int, context: TagContext) -> TagSet? {
+        let list = media.isEmpty ? [CandidateMedium(position: 1, tracks: c.tracks)] : media
+        guard disc >= 1, disc <= list.count, track >= 0, track < list[disc - 1].tracks.count else { return nil }
+        let index = list.prefix(disc - 1).reduce(0) { $0 + $1.tracks.count } + track
+        var t = albumTags(c, media: media, context: context)
+        fill(&t, track: list[disc - 1].tracks[track], medium: list[disc - 1], discNumber: disc, index: index, candidate: c, context: context)
+        return t
+    }
+
     private static func fill(_ t: inout TagSet, track: CandidateTrack, medium: CandidateMedium, discNumber: Int, index: Int, candidate c: Candidate, context: TagContext) {
         t.set(TagField.title, track.title)
         let credits = track.artistCredits.isEmpty ? c.artistCredits : track.artistCredits

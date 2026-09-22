@@ -52,6 +52,8 @@ open .build/DerivedData/Build/Products/Debug/drtagger.app --args --add ~/rips --
 open .build/DerivedData/Build/Products/Debug/drtagger.app --args --add ~/isos --extract-into ~/Music/Library
 # …or identify everything in the queue (uses the AcoustID / Discogs keys from Settings):
 open .build/DerivedData/Build/Products/Debug/drtagger.app --args --add ~/rips --identify
+# Several ISOs or CD1/CD2 folders that are one release are grouped into a release set automatically
+# (or by hand in the app) and identified, tagged and organised as one multi-disc album.
 # …or identify and write tags + cover to every album with a confident match (originals backed up in the store):
 open .build/DerivedData/Build/Products/Debug/drtagger.app --args --add ~/rips --identify --tag
 ```

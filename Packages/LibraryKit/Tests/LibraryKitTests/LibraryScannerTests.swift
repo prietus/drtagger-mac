@@ -47,6 +47,43 @@ struct LibraryScannerTests {
         return s
     }
 
+    @Test func severalNumberedImagesInOneFolderAreOneAlbum() throws {
+        let t = try TempTree()
+        defer { t.cleanup() }
+        let folder = "Led Zeppelin - Box Set 1990 Japan"
+        for n in 1...3 {
+            try t.file("\(folder)/Led Zeppelin - Box Set (Disc \(n)).flac", bytes: 10)
+            try t.file("\(folder)/Led Zeppelin - Box Set (Disc \(n)).cue", Self.cue(image: "Led Zeppelin - Box Set (Disc \(n)).flac", tracks: 4 + n))
+        }
+        let result = LibraryScanner().scan([t.root.appending(path: folder)])
+        #expect(result.albums.count == 1)
+        let album = try #require(result.albums.first)
+        #expect(album.kind == .cueImage && album.discs.map(\.number) == [1, 2, 3])
+        #expect(album.discs.map(\.trackCount) == [5, 6, 7])
+        #expect(album.discPosition == nil, "a whole box in one folder is not a set member")
+
+        // Unrelated images without numbers: keep the first, report the second.
+        let other = try t.dir("Two Albums")
+        try t.file("Two Albums/a.flac", bytes: 10); try t.file("Two Albums/a.cue", Self.cue(image: "a.flac"))
+        try t.file("Two Albums/b.flac", bytes: 10); try t.file("Two Albums/b.cue", Self.cue(image: "b.flac"))
+        let r2 = LibraryScanner().scan([other])
+        #expect(r2.albums.count == 1 && r2.issues.contains { $0.message.contains("ignored") })
+    }
+
+    @Test func discTokensInNames() {
+        #expect(FileRules.discNumber(fromFileName: "Led Zeppelin - Box Set (Disc 2).cue")?.number == 2)
+        let n = FileRules.discNumber(fromFileName: "CANCIONEROS DEL SIGLO DE ORO  Colombina  1451-1595 (disc 1-3).iso")
+        #expect(n?.number == 1 && n?.total == 3)
+        #expect(FileRules.discNumber(fromFileName: "Don Giovanni CD2")?.number == 2)
+        #expect(FileRules.discNumber(fromFileName: "Live - Disc 3 of 4")?.total == 4)
+        #expect(FileRules.discNumber(fromFileName: "Bach - Cantatas Vol. 40") == nil)
+        #expect(FileRules.discNumber(fromFileName: "AC-DC_(Japanese_SICP-1700-18)") == nil)
+        #expect(FileRules.discNumber(fromFileName: "King Crimson - Red (2024 CD FLAC)") == nil)
+        #expect(FileRules.strippingDiscToken("Led Zeppelin - Box Set (Disc 2)") == "Led Zeppelin - Box Set")
+        #expect(FileRules.strippingDiscToken("CANCIONEROS  Colombina  1451-1595 (disc 1-3).iso") == "CANCIONEROS Colombina 1451-1595")
+        #expect(FileRules.strippingDiscToken("Don Giovanni CD2") == "Don Giovanni")
+    }
+
     @Test func trackFolderWithArtwork() throws {
         let t = try TempTree()
         defer { t.cleanup() }

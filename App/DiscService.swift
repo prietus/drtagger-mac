@@ -113,40 +113,61 @@ final class DiscService {
             errors[record.path] = FFmpegLocator.LocateError.notFound.localizedDescription
             return
         }
-        guard let detected = record.detected, let disc = detected.discs.first, let cue = disc.cue else { return }
+        guard let detected = record.detected else { return }
+        let discs = detected.discs.filter { $0.cue != nil }.sorted { $0.number < $1.number }
+        guard !discs.isEmpty else { return }
         begin(record, String(localized: "Preparing…"), fraction: 0)
         record.state = .applying
         let path = record.path
+        var outcomes: [SplitOutcome] = []
         do {
-            let context = ProvisionalTags.AlbumContext.from(
-                cue: cue,
-                discNumber: detected.discs.count > 1 ? disc.number : nil,
-                discTotal: detected.discs.count > 1 ? detected.discs.count : nil,
-                toc: record.toc
-            )
-            let splitter = ImageSplitter(tool: tool)
-            let outcome = try await splitter.split(disc: disc, album: context, destinationRoot: destination, options: options) { [weak self] progress in
-                Task { @MainActor in
-                    self?.activity[path] = Activity(message: Self.describe(progress.phase), fraction: progress.fraction)
+            let multi = discs.count > 1
+            for (i, disc) in discs.enumerated() {
+                guard let cue = disc.cue else { continue }
+                let context = ProvisionalTags.AlbumContext.from(
+                    cue: cue,
+                    discNumber: multi ? disc.number : record.setPosition,
+                    discTotal: multi ? discs.count : record.setTotal,
+                    toc: i == 0 ? record.toc : nil
+                )
+                var opts = options
+                // Members of a set share the album folder named after the set.
+                if record.setID != nil, let title = record.setTitle {
+                    let base = PathTemplate.render(options.albumFolderTemplate, values: [
+                        "albumartist": record.artistHint ?? cue.performer ?? "Unknown Artist",
+                        "album": title,
+                        "year": record.yearHint ?? "",
+                    ], ascii: options.asciiFileNames)
+                    opts.albumFolderOverride = base + "/Disc \(record.setPosition ?? 1)"
                 }
+                let label = multi ? String(localized: "Disc \(disc.number): ") : ""
+                let splitter = ImageSplitter(tool: tool)
+                let outcome = try await splitter.split(disc: disc, album: context, destinationRoot: destination, options: opts) { [weak self] progress in
+                    Task { @MainActor in
+                        self?.activity[path] = Activity(message: label + Self.describe(progress.phase), fraction: (Double(i) + progress.fraction) / Double(discs.count))
+                    }
+                }
+                outcomes.append(outcome)
             }
-            record.splitOutcome = outcome
-            if record.toc == nil { record.toc = outcome.toc }
-            record.state = outcome.verified ? .scanned : .error
-            if !outcome.verified {
-                record.errorMessage = outcome.warnings.joined(separator: "\n")
+            record.splitOutcomes = outcomes
+            if record.toc == nil { record.toc = outcomes.first?.toc }
+            let verified = outcomes.allSatisfy(\.verified)
+            record.state = verified ? .scanned : .error
+            if !verified {
+                record.errorMessage = outcomes.flatMap(\.warnings).joined(separator: "\n")
             }
-            if outcome.verified, trashOriginals {
-                // Only after a byte-verified split: the image and its CUE go to the Trash.
-                let originals = [disc.imageFile?.url, disc.cueURL].compactMap { $0 }
+            if verified, trashOriginals {
+                // Only after a byte-verified split: the images and their CUEs go to the Trash.
+                let originals = discs.flatMap { [$0.imageFile?.url, $0.cueURL] }.compactMap { $0 }
                 Self.trash(originals, record: record)
             }
             end(record)
             // A fresh split has CRCs to compare, so refresh the CTDB verdict.
-            if outcome.ctdbTrackCRC32s != nil {
+            if outcomes.first?.ctdbTrackCRC32s != nil {
                 await checkCUEToolsDB(record, locator: locator)
             }
         } catch {
+            if !outcomes.isEmpty { record.splitOutcomes = outcomes }
             record.state = .error
             record.errorMessage = error.localizedDescription
             end(record, error: error)
@@ -163,6 +184,16 @@ final class DiscService {
         record.state = .applying
         let path = record.path
         let url = record.url
+        var options = options
+        // Members of a set share the album folder named after the set.
+        if record.setID != nil, let sacd = record.detected?.sacd {
+            let base = PathTemplate.render(options.albumFolderTemplate, values: [
+                "albumartist": sacd.albumArtist ?? record.artistHint ?? "Unknown Artist",
+                "album": sacd.albumTitle ?? record.setTitle ?? record.displayTitle,
+                "year": record.yearHint ?? "",
+            ], ascii: options.asciiFileNames)
+            options.albumFolderOverride = base + "/Disc \(record.setPosition ?? sacd.albumSequenceNumber)"
+        }
         do {
             let disc = try await Task.detached(priority: .userInitiated) { try SACDDiscReader.read(url: url) }.value
             var areas: [SACDArea] = []

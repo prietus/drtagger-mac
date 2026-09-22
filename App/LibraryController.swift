@@ -141,6 +141,7 @@ final class LibraryController {
             }
         }
         sessionIssues = result.issues
+        autoGroup(result.albums.compactMap { fetch(path: $0.id) })
         try? context.save()
 
         lastScanSummary = String(localized: "\(added) added, \(updated) updated, \(result.foldersVisited) folders scanned")
@@ -154,6 +155,127 @@ final class LibraryController {
         let folder = album.kind == .sacdISO ? album.url.deletingLastPathComponent() : album.url
         let prefix = folder.standardizedFileURL.path
         return result.issues.filter { $0.url.standardizedFileURL.path.hasPrefix(prefix) }
+    }
+
+    // MARK: Release sets
+
+    // Records that are one release together with `record`, in disc order.
+    func members(of record: AlbumRecord) -> [AlbumRecord] {
+        guard let id = record.setID else { return [record] }
+        return allRecords().filter { $0.setID == id }.sorted { ($0.setPosition ?? 0, $0.addedAt) < ($1.setPosition ?? 0, $1.addedAt) }
+    }
+
+    func isLeader(_ record: AlbumRecord) -> Bool {
+        members(of: record).first?.path == record.path
+    }
+
+    // Records in the same folder that carry a disc number and are not yet
+    // in a set: what "Group with folder siblings" would join.
+    func siblingCandidates(of record: AlbumRecord) -> [AlbumRecord] {
+        guard let key = setKey(record) else { return [] }
+        return allRecords().filter { $0.path != record.path && $0.setID == nil && setKey($0) == key }
+    }
+
+    // What makes two records discs of one release. SACDs carry the box title
+    // and catalog in their master TOC, so their key ignores folders; other
+    // albums need the same parent folder and the same name minus its disc
+    // token ("Box Set (Disc 1)" / "Box Set (Disc 2)").
+    private func setKey(_ record: AlbumRecord) -> String? {
+        guard let detected = record.detected, detected.discPosition != nil else { return nil }
+        if let sacd = detected.sacd, sacd.albumSetSize > 1 {
+            let title = (sacd.albumTitle ?? "").lowercased().trimmingCharacters(in: .whitespaces)
+            let catalog = sacd.albumCatalogNumber.lowercased().trimmingCharacters(in: .whitespaces)
+            if !catalog.isEmpty || !title.isEmpty { return "sacd|\(catalog)|\(title)" }
+        }
+        return "name|" + record.url.deletingLastPathComponent().path + "|" + detected.setBaseName.lowercased()
+    }
+
+    // Evidence-based grouping after a scan. New records join a set that
+    // already exists in the queue (an ISO added later still finds its box)
+    // or form one with ungrouped peers; a lone "disc 2 of 3" becomes a set
+    // of one so the missing discs are visible.
+    private func autoGroup(_ records: [AlbumRecord]) {
+        let all = allRecords()
+        for r in records where r.setID == nil {
+            guard let key = setKey(r) else { continue }
+            let peers = all.filter { $0.path != r.path && setKey($0) == key }
+            let mine = r.detected?.discPosition?.number
+            if let existing = peers.first(where: { $0.setID != nil }) {
+                let taken = members(of: existing).compactMap(\.setPosition)
+                if let mine, taken.contains(mine) { continue }        // same disc twice: leave it alone
+                join(r, to: existing)
+            } else {
+                let group = [r] + peers.filter { $0.setID == nil }
+                let declared = group.compactMap { $0.detected?.discPosition?.total }.max()
+                guard group.count > 1 || (declared ?? 0) > 1 else { continue }
+                let positions = group.compactMap { $0.detected?.discPosition?.number }
+                guard Set(positions).count == positions.count else { continue }
+                assign(group)
+            }
+        }
+    }
+
+    private func join(_ record: AlbumRecord, to existing: AlbumRecord) {
+        record.setID = existing.setID
+        record.setTitle = existing.setTitle
+        let all = members(of: existing)
+        record.setPosition = record.detected?.discPosition?.number ?? ((all.compactMap(\.setPosition).max() ?? 0) + 1)
+        let declared = all.compactMap { $0.detected?.discPosition?.total }.max() ?? 0
+        let total = max(declared, all.compactMap(\.setPosition).max() ?? 0, all.count)
+        for m in all { m.setTotal = total }
+        resetIdentification(all)
+    }
+
+    // A set that changed shape needs a fresh identification: the stored one
+    // was for other discs.
+    private func resetIdentification(_ records: [AlbumRecord]) {
+        for r in records where r.identificationData != nil {
+            r.identificationData = nil
+            r.selectedCandidateID = nil
+            if [.confident, .needsReview].contains(r.state) { r.state = .scanned }
+        }
+    }
+
+    func group(_ records: [AlbumRecord]) {
+        guard records.count > 1 else { return }
+        assign(records)
+        resetIdentification(records)
+        try? context.save()
+    }
+
+    private func assign(_ records: [AlbumRecord]) {
+        let id = UUID().uuidString
+        let ordered = records.sorted { a, b in
+            let pa = a.detected?.discPosition?.number ?? Int.max, pb = b.detected?.discPosition?.number ?? Int.max
+            return pa != pb ? pa < pb : a.displayTitle.localizedStandardCompare(b.displayTitle) == .orderedAscending
+        }
+        let declared = ordered.compactMap { $0.detected?.discPosition?.total }.max()
+        let total = max(declared ?? 0, ordered.compactMap { $0.detected?.discPosition?.number }.max() ?? 0, ordered.count)
+        let title = ordered.first?.detected?.setBaseName ?? ordered.first?.displayTitle ?? ""
+        for (i, r) in ordered.enumerated() {
+            r.setID = id
+            r.setPosition = r.detected?.discPosition?.number ?? (i + 1)
+            r.setTotal = total
+            r.setTitle = title
+        }
+    }
+
+    func ungroup(_ record: AlbumRecord) {
+        let all = members(of: record)
+        for r in all {
+            r.setID = nil; r.setPosition = nil; r.setTotal = nil; r.setTitle = nil
+        }
+        resetIdentification(all)
+        try? context.save()
+    }
+
+    func setPosition(_ record: AlbumRecord, to position: Int) {
+        guard position >= 1 else { return }
+        record.setPosition = position
+        let all = members(of: record)
+        let total = max(all.compactMap(\.setPosition).max() ?? 0, all.first?.setTotal ?? 0)
+        for r in all { r.setTotal = total }
+        try? context.save()
     }
 
     // MARK: Queries

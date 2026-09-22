@@ -84,10 +84,28 @@ public struct DetectedAlbum: Sendable, Equatable, Codable, Hashable, Identifiabl
         kind == .sacdISO ? url.deletingPathExtension().lastPathComponent : url.lastPathComponent
     }
 
+    // "Disc 2 of 3" evidence: the SACD master TOC's album set, else a disc
+    // token in the folder or ISO name. Used to group siblings into one release.
+    public var discPosition: (number: Int, total: Int?)? {
+        if let sacd, sacd.albumSetSize > 1 { return (sacd.albumSequenceNumber, sacd.albumSetSize) }
+        if discs.count > 1 { return nil }
+        return FileRules.discNumber(fromFileName: folderName)
+    }
+
+    // What siblings of one set share: the name without its disc token, or
+    // the SACD album title.
+    public var setBaseName: String {
+        if let sacd, sacd.albumSetSize > 1, let title = sacd.albumTitle, !title.isEmpty { return title }
+        return FileRules.strippingDiscToken(folderName)
+    }
+
     // Best available title / artist without any network lookup.
     public var titleHint: String? {
         if let t = sacd?.title { return t }
-        if let t = discs.first?.cue?.title, !t.isEmpty { return t }
+        if let t = discs.first?.cue?.title, !t.isEmpty {
+            // "Box Set (Disc 1)" names the disc, not the multi-disc album.
+            return discs.count > 1 ? FileRules.strippingDiscToken(t) : t
+        }
         return FolderNameParser.parse(folderName).displayTitle
     }
 
@@ -307,8 +325,25 @@ public struct LibraryScanner: Sendable {
             albums.append(DetectedAlbum(url: folder, kind: .trackFolder, discs: [disc], artworkFiles: artwork))
         }
 
-        // Two albums in one folder (two images with CUEs) are legitimate but
-        // rare; the caller keeps both, distinguished later by their cue.
+        // Several images in one folder: "(Disc 1)", "(Disc 2)"… are one
+        // multi-disc album; images without a disc number cannot be told apart
+        // from unrelated albums, so only the first is kept and the rest reported.
+        let images = albums.filter { $0.kind == .cueImage }
+        if images.count > 1 {
+            let numbered = images.compactMap { a -> (Int, DetectedAlbum)? in
+                guard let n = FileRules.discNumber(fromFileName: a.discs[0].cueURL?.lastPathComponent ?? "")?.number else { return nil }
+                return (n, a)
+            }
+            if numbered.count == images.count, Set(numbered.map(\.0)).count == numbered.count {
+                let discs = numbered.sorted { $0.0 < $1.0 }.map { n, a -> DetectedDisc in var d = a.discs[0]; d.number = n; return d }
+                albums = albums.filter { $0.kind != .cueImage } + [DetectedAlbum(url: folder, kind: .cueImage, discs: discs, artworkFiles: artwork)]
+            } else {
+                for extra in images.dropFirst() {
+                    result.issues.append(ScanIssue(url: extra.discs[0].cueURL ?? folder, message: "Another image in the same folder without a disc number in its name; ignored."))
+                }
+                albums = albums.filter { $0.kind != .cueImage } + [images[0]]
+            }
+        }
         return albums
     }
 

@@ -52,6 +52,12 @@ public struct AlbumSignals: Sendable, Codable, Hashable {
     public var mbReleaseIDs: [SignalValue<String>] = []
     public var discID: String?
     public var tocString: String?
+    // Release sets: which disc positions the local files cover, the total
+    // the set declares (SACD album set, "disc 2-3"), and per-disc IDs.
+    public var presentDiscs: [Int] = [1]
+    public var declaredDiscTotal: Int?
+    public var discIDs: [Int: String] = [:]
+    public var tocStrings: [Int: String] = [:]
     public var artistHint: String?
     public var albumHint: String?
     public var yearHint: String?
@@ -84,6 +90,9 @@ public struct AlbumSignals: Sendable, Codable, Hashable {
     }
 
     public var trackCount: Int { tracks.count }
+    // A partial or declared set: candidates are matched medium by medium.
+    public var isSet: Bool { presentDiscs != [1] || declaredDiscTotal != nil }
+    public var allDiscIDs: Set<String> { Set(discIDs.values).union(discID.map { [$0] } ?? []) }
     public var uniqueBarcodes: [String] { unique(barcodes.map(\.value)) }
     public var uniqueCatalogNumbers: [String] { unique(catalogNumbers.map(\.value)) }
     public var uniqueReleaseIDs: [String] { unique(mbReleaseIDs.map(\.value)) }
@@ -157,10 +166,24 @@ public struct SignalCollector: Sendable {
             }
         }
 
+        // Disc positions: a CD1/CD2 folder covers 1…n; a lone disc that says
+        // "disc 2 of 3" covers position 2 of a declared total of 3.
+        if album.discs.count > 1 {
+            s.presentDiscs = album.discs.map(\.number).sorted()
+        } else if let position = album.discPosition, let total = position.total, total > 1 {
+            s.presentDiscs = [position.number]
+            s.declaredDiscTotal = total
+            s.discCount = total
+        }
+
         // Disc TOC and CUETools DB hints.
         if let toc {
             s.discID = toc.musicBrainzDiscID
             s.tocString = toc.musicBrainzTOCString
+            if let first = s.presentDiscs.first {
+                s.discIDs[first] = toc.musicBrainzDiscID
+                s.tocStrings[first] = toc.musicBrainzTOCString
+            }
         }
         for m in ctdb where m.source == "musicbrainz" {
             if let id = m.id { s.mbReleaseIDs.append(SignalValue(id, origin: .ctdb, detail: "\(m.artist) – \(m.album)")) }
@@ -179,6 +202,8 @@ public struct SignalCollector: Sendable {
                 if let y = disc.year { s.yearHint = y }
                 let cat = disc.info.discCatalogNumber
                 if !cat.isEmpty { s.catalogNumbers.append(SignalValue(cat, origin: .sacdText)) }
+                let boxCat = disc.info.albumCatalogNumber
+                if !boxCat.isEmpty, boxCat != cat { s.catalogNumbers.append(SignalValue(boxCat, origin: .sacdText, detail: "album set")) }
             }
         } else if let first = album.discs.first?.trackFiles.first ?? album.discs.first?.imageFile {
             s.isDSD = first.format.isDSD
@@ -252,6 +277,71 @@ public struct SignalCollector: Sendable {
             let hits = results.filter(\.hasHit).count
             log("Artwork: scanned \(results.count) image(s), \(hits) with a barcode or catalog number.")
         }
+        return s
+    }
+
+    // MARK: Sets
+
+    public struct SetMember: Sendable {
+        public let album: DetectedAlbum
+        public let position: Int          // 1-based disc position in the release
+        public let toc: DiscTOC?
+
+        public init(album: DetectedAlbum, position: Int, toc: DiscTOC? = nil) {
+            self.album = album
+            self.position = position
+            self.toc = toc
+        }
+    }
+
+    // Several albums that are one release (a SACD box, "Box Set (Disc 1)"…):
+    // every member's signals, tracks in disc order, one disc ID per position.
+    public func collect(
+        set members: [SetMember],
+        declaredTotal: Int?,
+        ctdb: [CUEToolsDBClient.Metadata] = [],
+        options: Options = Options(),
+        log: @escaping @Sendable (String) -> Void = { _ in }
+    ) async -> AlbumSignals {
+        let ordered = members.sorted { $0.position < $1.position }
+        var merged: AlbumSignals? = nil
+        var seenBarcodes = Set<String>(), seenCatalogs = Set<String>(), seenMBIDs = Set<String>()
+        for member in ordered {
+            var part = await collect(album: member.album, toc: member.toc, ctdb: ctdb, options: options, log: log)
+            part.tracks = part.tracks.map { LocalTrack(index: $0.index, discNumber: member.position, title: $0.title, durationSeconds: $0.durationSeconds, url: $0.url, imageStart: $0.imageStart) }
+            if var m = merged {
+                let base = m.tracks.count
+                m.tracks += part.tracks.map { LocalTrack(index: base + $0.index, discNumber: $0.discNumber, title: $0.title, durationSeconds: $0.durationSeconds, url: $0.url, imageStart: $0.imageStart) }
+                for b in part.barcodes where seenBarcodes.insert(b.value).inserted { m.barcodes.append(b) }
+                for c in part.catalogNumbers where seenCatalogs.insert(c.value).inserted { m.catalogNumbers.append(c) }
+                for id in part.mbReleaseIDs where seenMBIDs.insert(id.value).inserted { m.mbReleaseIDs.append(id) }
+                m.artworkScans += part.artworkScans
+                if let id = part.discID { m.discIDs[member.position] = id }
+                if let t = part.tocString { m.tocStrings[member.position] = t }
+                merged = m
+            } else {
+                for b in part.barcodes { seenBarcodes.insert(b.value) }
+                for c in part.catalogNumbers { seenCatalogs.insert(c.value) }
+                for id in part.mbReleaseIDs { seenMBIDs.insert(id.value) }
+                part.discIDs = [:]; part.tocStrings = [:]
+                if let id = part.discID { part.discIDs[member.position] = id }
+                if let t = part.tocString { part.tocStrings[member.position] = t }
+                merged = part
+            }
+        }
+        guard var s = merged else { return AlbumSignals() }
+        s.presentDiscs = ordered.map(\.position)
+        s.declaredDiscTotal = declaredTotal ?? ordered.compactMap { $0.album.discPosition?.total }.max()
+        s.discCount = max(s.declaredDiscTotal ?? 0, ordered.map(\.position).max() ?? 1)
+        // The box title beats a disc title ("Piano Sonatas" over "Sonatas 1–7").
+        if let first = ordered.first?.album, let sacd = first.sacd, let box = sacd.albumTitle, !box.isEmpty {
+            s.albumHint = box
+            if let artist = sacd.albumArtist, !artist.isEmpty { s.artistHint = artist }
+        } else if let first = ordered.first?.album {
+            let parsed = FolderNameParser.parse(FileRules.strippingDiscToken(first.folderName))
+            if let t = parsed.title, s.albumHint == nil || s.albumHint == FolderNameParser.parse(first.folderName).title { s.albumHint = t }
+        }
+        log("Release set: discs \(s.presentDiscs.map(String.init).joined(separator: ", ")) of \(s.discCount), \(s.trackCount) track(s).")
         return s
     }
 

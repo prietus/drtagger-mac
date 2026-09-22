@@ -233,6 +233,42 @@ struct MatchScorerTests {
         #expect(MatchScorer.formatCompatibility(discogs, signals: rip) == .fits)
     }
 
+    @Test func setMembersMatchTheirMedium() {
+        func medium(_ pos: Int, _ durations: [Int], discID: String? = nil) -> CandidateMedium {
+            CandidateMedium(position: pos, format: "CD", tracks: durations.enumerated().map { CandidateTrack(position: $0.offset + 1, title: "T", durationMS: $0.element * 1000) }, discIDs: discID.map { [$0] } ?? [])
+        }
+        let box = Candidate(source: .musicbrainz, providerID: "box", title: "Box Set", artist: "Led Zeppelin", trackCount: 9,
+                            media: [medium(1, [200, 210, 220], discID: "id1"), medium(2, [300, 310, 320], discID: "id2"), medium(3, [400, 410, 420], discID: "id3")])
+        let single = Candidate(source: .musicbrainz, providerID: "single", title: "Box Set", artist: "Led Zeppelin", trackCount: 3, media: [medium(1, [300, 310, 320])])
+
+        // Disc 2 alone, declared "2 of 3".
+        var two = AlbumSignals()
+        two.tracks = [300.0, 310, 320].enumerated().map { LocalTrack(index: $0.offset, discNumber: 2, title: nil, durationSeconds: $0.element, url: nil) }
+        two.presentDiscs = [2]; two.declaredDiscTotal = 3; two.discCount = 3
+        two.discIDs = [2: "id2"]
+        two.artistHint = "Led Zeppelin"; two.albumHint = "Box Set"
+        let b = MatchScorer.score(box, signals: two, origins: [.discID], fingerprintVote: nil, fingerprintedTracks: 0)
+        #expect(b.trackCountMatches == true && (b.durationFit ?? 0) > 0.99, "medium 2 is compared, not the whole box")
+        #expect(b.reasons.contains("Disc ID matches") && b.reasons.contains("3 discs"))
+        let sgl = MatchScorer.score(single, signals: two, origins: [.textSearch], fingerprintVote: nil, fingerprintedTracks: 0)
+        #expect(sgl.reasons.contains { $0.hasPrefix("Release has no disc 2") })
+        #expect(b.score > sgl.score + 40)
+
+        // Discs 1 and 3 of the box (2 missing): both IDs match, no penalty for the gap.
+        var partial = AlbumSignals()
+        partial.tracks = ([200.0, 210, 220].map { ($0, 1) } + [400.0, 410, 420].map { ($0, 3) }).enumerated().map { LocalTrack(index: $0.offset, discNumber: $0.element.1, title: nil, durationSeconds: $0.element.0, url: nil) }
+        partial.presentDiscs = [1, 3]; partial.declaredDiscTotal = 3; partial.discCount = 3
+        partial.discIDs = [1: "id1", 3: "id3"]
+        let p = MatchScorer.score(box, signals: partial, origins: [.discID], fingerprintVote: nil, fingerprintedTracks: 0)
+        #expect(p.trackCountMatches == true && p.reasons.contains("Disc IDs match for 2 discs"))
+        #expect(p.confidence >= .likely)
+
+        // A plain album keeps the old behaviour: every medium counts.
+        var whole = AlbumSignals()
+        whole.tracks = (0..<9).map { LocalTrack(index: $0, discNumber: 1, title: nil, durationSeconds: nil, url: nil) }
+        #expect(MatchScorer.score(box, signals: whole, origins: [.textSearch], fingerprintVote: nil, fingerprintedTracks: 0).trackCountMatches == true)
+    }
+
     @Test func normalisation() {
         #expect(MatchScorer.normalize("The Rolling Stones") == "rolling stones")
         #expect(MatchScorer.normalize("Leño – ¡Corre, corre!") == "leno corre corre")

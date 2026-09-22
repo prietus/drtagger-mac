@@ -134,6 +134,17 @@ enum Fixtures {
         #expect(PicardMapper.normalizedRole("Guitar [Acoustic]") == "acoustic guitar")
     }
 
+    @Test func tagsByDiscPosition() throws {
+        let media = [CandidateMedium(position: 1, format: "CD", title: "Atto primo", tracks: [CandidateTrack(position: 1, title: "Ouverture"), CandidateTrack(position: 2, title: "Notte e giorno")]),
+                     CandidateMedium(position: 2, format: "CD", title: "Atto secondo", tracks: [CandidateTrack(position: 1, title: "Eh via buffone")])]
+        let opera = Candidate(source: .musicbrainz, providerID: "dg", title: "Don Giovanni", artist: "Mozart", trackCount: 3, media: media)
+        let t = try #require(PicardMapper.trackTags(opera, media: media, disc: 2, track: 0, context: TagContext()))
+        #expect(t.first(TagField.title) == "Eh via buffone" && t.first(TagField.discNumber) == "2" && t.first(TagField.discTotal) == "2")
+        #expect(t.first(TagField.discSubtitle) == "Atto secondo" && t.first(TagField.trackNumber) == "1" && t.first(TagField.trackTotal) == "1")
+        #expect(PicardMapper.trackTags(opera, media: media, disc: 3, track: 0, context: TagContext()) == nil)
+        #expect(PicardMapper.trackTags(opera, media: media, disc: 1, track: 2, context: TagContext()) == nil)
+    }
+
     @Test func mergeReplacesClearsAndLocks() {
         var existing = TagSet()
         existing.set(TagField.title, "so what (old)"); existing.set(TagField.mbAlbumID, "stale-release"); existing.set("REPLAYGAIN_TRACK_GAIN", "-6.1 dB")

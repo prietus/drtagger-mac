@@ -9,7 +9,10 @@ struct TagPreviewView: View {
     let record: AlbumRecord
     @Environment(TagService.self) private var tagging
     @Environment(AppSettings.self) private var settings
+    @Environment(LibraryController.self) private var library
     @State private var showUnchanged = false
+
+    private var members: [AlbumRecord] { library.members(of: record) }
     @State private var showTracks = false
     @State private var showLog = false
 
@@ -63,7 +66,7 @@ struct TagPreviewView: View {
         // Picking another release re-runs the preview when one was showing.
         .onChange(of: record.selectedCandidateID) { _, _ in
             guard tagging.plan(for: record) != nil, hasCandidate, !tagging.isBusy(record) else { return }
-            Task { await tagging.buildPlan(record, settings: settings) }
+            Task { await tagging.buildPlan(record, members: members, settings: settings) }
         }
     }
 
@@ -87,15 +90,15 @@ struct TagPreviewView: View {
                 Text("Not previewed yet").foregroundStyle(.tertiary)
             }
             Spacer()
-            if !record.tagBackups.isEmpty {
-                Button("Restore Originals") { Task { await tagging.restore(record) } }
+            if members.contains(where: { !$0.tagBackups.isEmpty }) {
+                Button("Restore Originals") { Task { await tagging.restore(record, members: members) } }
                     .disabled(tagging.isBusy(record))
                     .help("Put back the metadata every file had before the first Apply")
             }
-            Button(plan == nil ? "Preview Tags" : "Refresh") { Task { await tagging.buildPlan(record, settings: settings) } }
+            Button(plan == nil ? "Preview Tags" : "Refresh") { Task { await tagging.buildPlan(record, members: members, settings: settings) } }
                 .disabled(tagging.isBusy(record) || !hasCandidate)
             if let plan {
-                Button("Apply") { Task { await tagging.apply(record, settings: settings) } }
+                Button("Apply") { Task { await tagging.apply(record, members: members, settings: settings) } }
                     .buttonStyle(.borderedProminent)
                     .disabled(tagging.isBusy(record) || !plan.hasWork)
                     .help("Write the tags and the cover; originals are backed up and the audio is verified untouched")
@@ -189,7 +192,7 @@ struct TagPreviewView: View {
             }
             ForEach(changes) { change in
                 TagChangeRow(change: change, locked: record.tagLocks.contains(change.name)) {
-                    tagging.toggleLock(change.name, for: record)
+                    tagging.toggleLock(change.name, for: record, members: members)
                 }
             }
         }
@@ -212,7 +215,7 @@ struct TagPreviewView: View {
                         }
                         ForEach(changes) { change in
                             TagChangeRow(change: change, locked: record.tagLocks.contains(change.name)) {
-                                tagging.toggleLock(change.name, for: record)
+                                tagging.toggleLock(change.name, for: record, members: members)
                             }
                         }
                     }
