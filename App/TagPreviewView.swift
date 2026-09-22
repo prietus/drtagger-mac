@@ -39,6 +39,7 @@ struct TagPreviewView: View {
                         Label(w, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
                     }
                     coverRow(plan)
+                    applyEffects
                     albumFields(plan)
                     tracksSection(plan)
                     if !plan.log.isEmpty {
@@ -103,6 +104,22 @@ struct TagPreviewView: View {
         .font(.callout)
     }
 
+    // What Apply does beyond the diff shown.
+    private var applyEffects: some View {
+        var parts: [String] = []
+        if settings.computeReplayGain { parts.append(String(localized: "loudness is measured and ReplayGain / R128 tags are written")) }
+        if settings.organizeAfterApply, let root = settings.libraryRootURL {
+            parts.append(String(localized: "files move to \(root.lastPathComponent)/\(settings.albumFolderTemplate)/\(settings.trackFileTemplate)"))
+        }
+        return Group {
+            if !parts.isEmpty {
+                Text("On Apply, " + parts.joined(separator: "; ") + ".")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
     private var reportsSummary: some View {
         let files = record.tagReports.count
         let withCover = record.tagReports.filter { $0.pictureCount > 0 }.count
@@ -141,7 +158,7 @@ struct TagPreviewView: View {
                 if !plan.artworkOptions.isEmpty {
                     Picker("Cover", selection: Binding(
                         get: { plan.coverOptionID ?? "" },
-                        set: { id in Task { await tagging.chooseCover(id.isEmpty ? nil : id, for: record) } }
+                        set: { id in Task { await tagging.chooseCover(id.isEmpty ? nil : id, for: record, settings: settings) } }
                     )) {
                         Text("Keep existing pictures").tag("")
                         ForEach(plan.artworkOptions) { option in

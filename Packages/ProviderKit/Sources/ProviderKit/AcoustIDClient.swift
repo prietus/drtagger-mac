@@ -31,17 +31,20 @@ public actor AcoustIDClient {
         public let recordingID: String          // MBID of the recording
         public let recordingTitle: String?
         public let releaseIDs: [String]         // MBIDs of releases containing this recording
+        public let acoustID: String?            // the AcoustID track id (result id), for ACOUSTID_ID
 
         public init(
             score: Double,
             recordingID: String,
             recordingTitle: String?,
-            releaseIDs: [String]
+            releaseIDs: [String],
+            acoustID: String? = nil
         ) {
             self.score = score
             self.recordingID = recordingID
             self.recordingTitle = recordingTitle
             self.releaseIDs = releaseIDs
+            self.acoustID = acoustID
         }
     }
 
@@ -162,7 +165,8 @@ public actor AcoustIDClient {
                         score: score,
                         recordingID: recID,
                         recordingTitle: recording.title,
-                        releaseIDs: releaseIDs
+                        releaseIDs: releaseIDs,
+                        acoustID: result.id
                     )
                 )
             }

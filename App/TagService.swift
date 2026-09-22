@@ -1,6 +1,7 @@
 import Foundation
 import IdentifyKit
 import LibraryKit
+import LoudnessKit
 import Observation
 import ProviderKit
 import SACDKit
@@ -77,18 +78,20 @@ final class TagService {
 
     // Files that receive the tags, with the album track index each maps to.
     static func targetFiles(_ record: AlbumRecord) -> (targets: [(url: URL, index: Int)], problem: String?) {
+        let r: (targets: [(url: URL, index: Int)], problem: String?)
         switch record.kind {
         case .sacdISO:
             guard !record.sacdOutcomes.isEmpty else { return ([], String(localized: "Extract the SACD first; the DSF tracks receive the tags.")) }
-            return (record.sacdOutcomes.flatMap { o in o.tracks.map { ($0.url, $0.number - 1) } }, nil)
+            r = (record.sacdOutcomes.flatMap { o in o.tracks.map { ($0.url, $0.number - 1) } }, nil)
         case .cueImage:
             guard let split = record.splitOutcome else { return ([], String(localized: "Split the image first; the FLAC tracks receive the tags.")) }
-            return (split.tracks.filter { $0.number > 0 }.map { ($0.url, $0.number - 1) }, nil)
+            r = (split.tracks.filter { $0.number > 0 }.map { ($0.url, $0.number - 1) }, nil)
         case .cueMultiFile, .trackFolder:
             guard let detected = record.detected else { return ([], nil) }
             let files = detected.discs.sorted { $0.number < $1.number }.flatMap { $0.trackFiles.map(\.url) }
-            return (files.enumerated().map { ($0.element, $0.offset) }, nil)
+            r = (files.enumerated().map { ($0.element, $0.offset) }, nil)
         }
+        return (r.targets.map { (record.resolved($0.url), $0.index) }, r.problem)
     }
 
     func buildPlan(_ record: AlbumRecord, settings: AppSettings) async {
@@ -112,6 +115,7 @@ final class TagService {
         context.musicBrainzDiscID = record.toc?.musicBrainzDiscID
         context.freedbDiscID = record.toc?.freeDBDiscID
         context.writeGenres = settings.writeGenresFromDiscogs
+        context.acoustIDs = identification?.fingerprints?.acoustIDs ?? [:]
         let locks = record.tagLocks
         var warnings: [String] = []
         let releaseTracks = (media.isEmpty ? [CandidateMedium(position: 1, tracks: candidate.tracks)] : media).reduce(0) { $0 + $1.tracks.count }
@@ -147,7 +151,7 @@ final class TagService {
         if settings.embedFrontCover {
             activity[path] = Activity(message: String(localized: "Looking for artwork…"), fraction: nil)
             let logBox = LogBox()
-            let fetcher = CoverArtFetcher(userAgent: IdentifyService.userAgent)
+            let fetcher = CoverArtFetcher(userAgent: IdentifyService.userAgent, fanartKey: settings.isFanartConfigured ? settings.fanartKey.trimmed : nil)
             let options = await fetcher.options(for: candidate, discogs: context.discogs, album: record.detected) { logBox.append($0) }
             plan.artworkOptions = options
             let preferred = record.coverOptionID.flatMap { id in options.first { $0.id == id } }
@@ -165,7 +169,7 @@ final class TagService {
     }
 
     // nil keeps the files' own pictures.
-    func chooseCover(_ optionID: String?, for record: AlbumRecord) async {
+    func chooseCover(_ optionID: String?, for record: AlbumRecord, settings: AppSettings) async {
         guard var plan = plans[record.path] else { return }
         guard let optionID, let option = plan.artworkOptions.first(where: { $0.id == optionID }) else {
             plan.cover = nil; plan.coverOptionID = nil; plans[record.path] = plan
@@ -173,7 +177,7 @@ final class TagService {
         }
         activity[record.path] = Activity(message: String(localized: "Downloading artwork…"), fraction: nil)
         defer { activity[record.path] = nil }
-        if let art = await CoverArtFetcher(userAgent: IdentifyService.userAgent).fetch(option) {
+        if let art = await CoverArtFetcher(userAgent: IdentifyService.userAgent, fanartKey: settings.isFanartConfigured ? settings.fanartKey.trimmed : nil).fetch(option) {
             plan.cover = art; plan.coverOptionID = optionID
         } else {
             plan.warnings.append(String(localized: "\(option.label): could not be downloaded."))
@@ -204,13 +208,37 @@ final class TagService {
         let embed: Picture? = plan.cover.flatMap { try? ArtworkProcessor.prepared(from: $0.data, maxPixels: settings.embedCoverMaxPixels) }
         let coverData = settings.saveCoverFile ? plan.cover?.data : nil
         let coverExtension = plan.cover.map { ArtworkProcessor.mimeType(of: $0.data) == "image/png" ? "png" : "jpg" } ?? "jpg"
-        let work = plan.tracks
+        var work = plan.tracks
+        var problems: [String] = []
+
+        // 1. Loudness first, so ReplayGain lands in the same write.
+        if settings.computeReplayGain, let location = settings.ffmpegLocator.locate(), let probe = location.ffprobe {
+            activity[path] = Activity(message: String(localized: "Measuring loudness…"), fraction: 0)
+            let analyzer = LoudnessAnalyzer(tool: FFmpegTool(ffmpeg: location.ffmpeg, ffprobe: probe))
+            do {
+                let album = try await analyzer.analyzeAlbum(work.map(\.url)) { [weak self] done, total in
+                    Task { @MainActor in self?.activity[path] = Activity(message: String(localized: "Measuring loudness…"), fraction: Double(done) / Double(total)) }
+                }
+                let locks = record.tagLocks
+                for i in work.indices where i < album.tracks.count {
+                    let container = TagContainer.from(url: work[i].url)
+                    let dsd = container == .dsf || container == .dff
+                    for (name, value) in ReplayGain.tags(track: album.tracks[i], album: album, dsd: dsd) where !locks.contains(name) {
+                        work[i].result.set(name, value)
+                    }
+                }
+            } catch {
+                problems.append(String(localized: "Loudness measurement failed: \(error.localizedDescription)"))
+            }
+        }
+        let workItems = work
+        let total = workItems.count
         let progress: @Sendable (Int) -> Void = { [weak self] done in
-            Task { @MainActor in self?.activity[path] = Activity(message: String(localized: "Writing tags…"), fraction: Double(done) / Double(work.count)) }
+            Task { @MainActor in self?.activity[path] = Activity(message: String(localized: "Writing tags…"), fraction: Double(done) / Double(total)) }
         }
         let outcome: (backups: [TagBackup], reports: [TagWriteReport], problems: [String]) = await Task.detached {
             var backups: [TagBackup] = [], reports: [TagWriteReport] = [], problems: [String] = []
-            for (i, t) in work.enumerated() {
+            for (i, t) in workItems.enumerated() {
                 do {
                     let contents = try TaggedFile.read(t.url)
                     backups.append(TagBackup(url: t.url, container: try TaggedFile.container(for: t.url), contents: contents))
@@ -221,25 +249,57 @@ final class TagService {
                 }
                 progress(i + 1)
             }
-            if let coverData, let first = work.first {
+            if let coverData, let first = workItems.first {
                 let folder = first.url.deletingLastPathComponent()
                 let existing = ["jpg", "jpeg", "png"].map { folder.appending(path: "cover.\($0)") }.first { FileManager.default.fileExists(atPath: $0.path) }
                 if existing == nil { try? coverData.write(to: folder.appending(path: "cover.\(coverExtension)")) }
             }
             return (backups, reports, problems)
         }.value
+        problems.append(contentsOf: outcome.problems)
+        var backups = record.tagBackups.isEmpty ? outcome.backups : record.tagBackups
+        var reports = outcome.reports
+
+        // 2. Library layout from the final tags.
+        if settings.organizeAfterApply, let root = settings.libraryRootURL, outcome.problems.isEmpty, !reports.isEmpty {
+            var options = LibraryOrganizer.Options()
+            options.albumFolderTemplate = settings.albumFolderTemplate
+            options.trackFileTemplate = settings.trackFileTemplate
+            options.asciiFileNames = settings.asciiFileNames
+            let files = work.map { (url: $0.url, tags: $0.result) }
+            let planned = LibraryOrganizer.plan(files: files, root: root, options: options)
+            if !planned.isEmpty {
+                activity[path] = Activity(message: String(localized: "Organizing files…"), fraction: nil)
+                do {
+                    let moved = try await Task.detached { try LibraryOrganizer.perform(planned) }.value
+                    var map = record.fileMoves
+                    for m in moved { map[m.from.path] = m.to.path }
+                    record.fileMoves = map
+                    backups = backups.map { b in map[b.path].map { b.moved(to: $0) } ?? b }
+                    reports = reports.map { r in map[r.path].map { r.moved(to: $0) } ?? r }
+                    // A loose folder that moved as a whole is now the album's home.
+                    let folders = Set(reports.map { URL(fileURLWithPath: $0.path).deletingLastPathComponent().path })
+                    if record.kind == .trackFolder || record.kind == .cueMultiFile, folders.count == 1, let folder = folders.first, folder != record.path {
+                        record.path = folder
+                    }
+                } catch {
+                    problems.append(String(localized: "Could not move files into the library: \(error.localizedDescription)"))
+                }
+            }
+        }
+
         // The first backups are the true originals; later applies keep them.
-        if record.tagBackups.isEmpty { record.tagBackups = outcome.backups }
-        record.tagReports = outcome.reports
+        record.tagBackups = backups
+        record.tagReports = reports
         record.taggedAt = Date()
         record.coverOptionID = plan.coverOptionID
-        if outcome.problems.isEmpty {
+        if problems.isEmpty {
             record.state = .done
             record.errorMessage = nil
         } else {
-            record.state = outcome.reports.isEmpty ? .error : .done
-            record.errorMessage = outcome.problems.joined(separator: "\n")
-            errors[path] = outcome.problems.first
+            record.state = reports.isEmpty ? .error : .done
+            record.errorMessage = problems.joined(separator: "\n")
+            errors[path] = problems.first
         }
         plans[path] = nil
         activity[path] = nil

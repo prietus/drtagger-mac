@@ -108,7 +108,7 @@ final class DiscService {
 
     // MARK: Split
 
-    func split(_ record: AlbumRecord, into destination: URL, locator: FFmpegLocator, options: SplitOptions = SplitOptions()) async {
+    func split(_ record: AlbumRecord, into destination: URL, locator: FFmpegLocator, options: SplitOptions = SplitOptions(), trashOriginals: Bool = false) async {
         guard let tool = Self.tool(locator) else {
             errors[record.path] = FFmpegLocator.LocateError.notFound.localizedDescription
             return
@@ -136,6 +136,11 @@ final class DiscService {
             if !outcome.verified {
                 record.errorMessage = outcome.warnings.joined(separator: "\n")
             }
+            if outcome.verified, trashOriginals {
+                // Only after a byte-verified split: the image and its CUE go to the Trash.
+                let originals = [disc.imageFile?.url, disc.cueURL].compactMap { $0 }
+                Self.trash(originals, record: record)
+            }
             end(record)
             // A fresh split has CRCs to compare, so refresh the CTDB verdict.
             if outcome.ctdbTrackCRC32s != nil {
@@ -152,7 +157,7 @@ final class DiscService {
 
     // Extracts the stereo area (and the multichannel one when asked) of a
     // SACD image into DSF files under the destination root.
-    func extractSACD(_ record: AlbumRecord, into destination: URL, multichannel: Bool, options: SACDExtractOptions = SACDExtractOptions()) async {
+    func extractSACD(_ record: AlbumRecord, into destination: URL, multichannel: Bool, options: SACDExtractOptions = SACDExtractOptions(), trashOriginals: Bool = false) async {
         guard record.kind == .sacdISO else { return }
         begin(record, String(localized: "Reading disc…"), fraction: 0)
         record.state = .applying
@@ -179,12 +184,23 @@ final class DiscService {
             let ok = outcomes.allSatisfy(\.verified)
             record.state = ok ? .scanned : .error
             record.errorMessage = ok ? nil : outcomes.flatMap(\.warnings).joined(separator: "\n")
+            if ok, trashOriginals { Self.trash([url], record: record) }
             end(record)
         } catch {
             record.state = .error
             record.errorMessage = error.localizedDescription
             end(record, error: error)
         }
+    }
+
+    // Moves files to the Trash; a failure is reported on the record, never fatal.
+    private static func trash(_ urls: [URL], record: AlbumRecord) {
+        var problems: [String] = []
+        for url in urls {
+            do { try FileManager.default.trashItem(at: url, resultingItemURL: nil) }
+            catch { problems.append("\(url.lastPathComponent): \(error.localizedDescription)") }
+        }
+        if !problems.isEmpty { record.errorMessage = String(localized: "Could not move originals to the Trash: ") + problems.joined(separator: "; ") }
     }
 
     private static func describe(_ phase: SplitProgress.Phase) -> String {

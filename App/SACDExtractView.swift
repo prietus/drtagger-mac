@@ -126,6 +126,9 @@ struct SACDExtractView: View {
         var options = SACDExtractOptions()
         options.overwriteExisting = !record.sacdOutcomes.isEmpty
         options.pausePolicy = settings.sacdPausePolicy
-        Task { await disc.extractSACD(record, into: destination, multichannel: settings.extractMultichannel, options: options) }
+        options.albumFolderTemplate = settings.albumFolderTemplate
+        options.trackFileTemplate = settings.trackFileTemplate
+        options.asciiFileNames = settings.asciiFileNames
+        Task { await disc.extractSACD(record, into: destination, multichannel: settings.extractMultichannel, options: options, trashOriginals: settings.moveOriginalsToTrash) }
     }
 }

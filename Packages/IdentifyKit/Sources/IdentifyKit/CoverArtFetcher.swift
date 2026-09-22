@@ -8,7 +8,7 @@ import ProviderKit
 // scans already in the folder.
 public struct ArtworkOption: Sendable, Equatable, Hashable, Identifiable, Codable {
     public enum Source: String, Sendable, Codable, Hashable {
-        case coverArtArchive, coverArtArchiveGroup, discogs, itunes, deezer, local
+        case coverArtArchive, coverArtArchiveGroup, fanart, discogs, itunes, deezer, local
     }
 
     public let source: Source
@@ -33,9 +33,11 @@ public actor CoverArtFetcher {
     private let caa: CoverArtArchiveClient
     private let itunes: ITunesSearchClient
     private let deezer: DeezerClient
+    private let fanart: FanartClient?
 
-    public init(userAgent: String) {
+    public init(userAgent: String, fanartKey: String? = nil) {
         self.userAgent = userAgent
+        fanart = fanartKey.flatMap { $0.isEmpty ? nil : FanartClient(apiKey: $0, userAgent: userAgent) }
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 30
         session = URLSession(configuration: config)
@@ -56,6 +58,14 @@ public actor CoverArtFetcher {
             }
             if let group = candidate.releaseGroupID, let url = URL(string: "https://coverartarchive.org/release-group/\(group)/front") {
                 out.append(ArtworkOption(source: .coverArtArchiveGroup, url: url, label: "Cover Art Archive (release group)", isLocal: false))
+            }
+        }
+        if let fanart, let group = candidate.releaseGroupID {
+            if let covers = try? await fanart.albumCovers(releaseGroupID: group) {
+                for c in covers.prefix(2) { out.append(ArtworkOption(source: .fanart, url: c.url, label: "fanart.tv · \(c.likes) likes", isLocal: false)) }
+                if covers.isEmpty { log("fanart.tv: no cover for this release group.") }
+            } else {
+                log("fanart.tv: request failed.")
             }
         }
         if let d = discogs ?? (candidate.source == .discogs ? candidate : nil), let url = d.coverArtURL {

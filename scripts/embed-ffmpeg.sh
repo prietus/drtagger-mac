@@ -20,7 +20,10 @@ for bin in ffmpeg ffprobe; do
     cp -f "$SRC/$bin" "$DEST/$bin"
     chmod 755 "$DEST/$bin"
     if [ "${CODE_SIGNING_ALLOWED:-NO}" = "YES" ] && [ -n "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
-        codesign --force --options runtime --timestamp=none \
+        # Release archives need a secure timestamp for notarization; Debug
+        # builds skip it so an offline machine still builds.
+        if [ "${CONFIGURATION:-Debug}" = "Release" ]; then TS="--timestamp"; else TS="--timestamp=none"; fi
+        codesign --force --options runtime $TS \
             --sign "$EXPANDED_CODE_SIGN_IDENTITY" "$DEST/$bin"
     fi
 done

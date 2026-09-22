@@ -224,7 +224,19 @@ blocks. Audio is never rewritten; stream MD5 is verified after each write.
   tags from the CUE, and computes CUETools DB CRCs. `PathTemplate` renders
   `{albumartist}/{album} ({year})/{track} {title}` safely. Verified on a
   real XRCD rip: all five track CRCs and the disc CRC equal the CTDB entry.
-  ReplayGain / `ebur128` still to come (phase 6).
+  `PathTemplate` renders the templates with an optional ASCII
+  transliteration (`asciiSafe`: Latin transform, diacritics stripped,
+  typographic punctuation normalised).
+- `LoudnessKit` (phase 6, done) — ITU-R BS.1770-4 / EBU R128 in Swift:
+  K-weighting biquads derived for any sample rate (libebur128 constants),
+  400 ms blocks every 100 ms, absolute and relative gates, sample peak and
+  true peak by 4×/2× polyphase sinc interpolation. Album loudness gates the
+  union of every track's blocks. Audio is decoded by the bundled ffmpeg to
+  32-bit PCM (DSD and >192 kHz resampled to 88.2 kHz); the meter agrees
+  with ffmpeg's `ebur128` within 0.15 LU / 0.2 dB and reads the EBU Tech
+  3341 calibration tone at -23.0 LUFS. `ReplayGain` writes RG2 tags
+  (reference -18 LUFS, true-peak factor) and, for DSD, R128_TRACK/ALBUM_GAIN
+  in Q7.8 relative to -23 LUFS.
 - `IdentifyKit` (phase 4, done) — `SignalCollector` gathers barcodes and
   catalog numbers from artwork (Vision barcodes in three orientations, OCR
   with `ja`, glued codes like PD83889 recognised), existing tags via ffprobe
@@ -267,8 +279,12 @@ blocks. Audio is never rewritten; stream MD5 is verified after each write.
   every container. `ArtworkProcessor` resizes the front cover (JPEG 90 %,
   small PNGs kept); `CoverArtFetcher` (IdentifyKit) lists sources in order:
   Cover Art Archive release, release group, Discogs, iTunes, Deezer, folder
-  scans. Not yet: ACOUSTID_ID (the AcoustID client does not surface the
-  result id), fanart.tv, non-Latin transliteration for file names.
+  scans, fanart.tv (release-group covers by likes, with a key). ACOUSTID_ID
+  is written from the AcoustID result id kept per track. `LibraryOrganizer`
+  moves the written files into root / album template / "Disc N" (multi-disc)
+  / "Multichannel" / track template, carries sidecars (scans, cue, logs)
+  along when a folder empties and removes it; the app records every move
+  so backups, reports and later re-tagging follow the files.
 
 ### ffmpeg
 `scripts/build-ffmpeg.sh` builds a minimal LGPL ffmpeg (no `--enable-gpl`,
@@ -302,6 +318,13 @@ Responses cached on disk keyed by URL with provider-specific TTLs.
    "Tags" section: Preview / Apply / Restore Originals, cover picker,
    album-level and per-track diff with locks; `--tag` launch argument).
 6. ReplayGain, path templates, localisation, signing and notarisation.
+   **Done 2026-09-21**: loudness measured on Apply (setting), templates
+   editable in Settings with a live preview and ASCII-only names, files
+   organised into the library after Apply, originals moved to the Trash
+   after a verified split/extract (setting), Spanish localisation of every
+   string, `scripts/release.sh` (Developer ID archive, export, notarytool,
+   staple; needs a `drtagger-notary` keychain profile) with secure
+   timestamps on the app and the ffmpeg helpers.
 
 ## 5. Sample files
 

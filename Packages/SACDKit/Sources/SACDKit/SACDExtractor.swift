@@ -16,6 +16,7 @@ public struct SACDExtractOptions: Sendable, Equatable {
     public var pausePolicy: PausePolicy = .appendToPrevious
     public var albumFolderTemplate: String = PathTemplate.defaultAlbumFolder
     public var trackFileTemplate: String = PathTemplate.defaultTrackFile
+    public var asciiFileNames: Bool = false
     public var multichannelSubfolder: String = "Multichannel"
     public var writeTags: Bool = true
     public var overwriteExisting: Bool = false
@@ -96,7 +97,7 @@ public struct SACDExtractor: Sendable {
             "albumartist": albumArtist,
             "album": album,
             "year": disc.year ?? "",
-        ])
+        ], ascii: options.asciiFileNames)
         if disc.info.albumSetSize > 1 {
             relative += "/Disc \(disc.info.albumSequenceNumber)"
         }
@@ -122,7 +123,7 @@ public struct SACDExtractor: Sendable {
                 "title": track.title ?? "Track \(track.number)",
                 "artist": track.performer ?? albumArtist,
                 "album": album,
-            ])
+            ], ascii: options.asciiFileNames)
             let url = outputFolder.appending(path: (name.isEmpty ? String(format: "%02d", track.number) : name) + ".dsf", directoryHint: .notDirectory)
             if FileManager.default.fileExists(atPath: url.path) {
                 guard options.overwriteExisting else { throw SACDExtractError.outputExists(url.lastPathComponent) }

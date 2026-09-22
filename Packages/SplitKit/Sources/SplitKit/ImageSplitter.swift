@@ -7,6 +7,7 @@ public struct SplitOptions: Sendable, Equatable {
     public var htoaThresholdFrames: Int = 150
     public var albumFolderTemplate: String = PathTemplate.defaultAlbumFolder
     public var trackFileTemplate: String = PathTemplate.defaultTrackFile
+    public var asciiFileNames: Bool = false
     public var writeProvisionalTags: Bool = true
     public var overwriteExisting: Bool = false
 
@@ -164,7 +165,7 @@ public actor ImageSplitter {
             "year": album.date.map { String($0.prefix(4)) } ?? "",
         ]
         if let n = album.discNumber { albumValues["disc"] = String(n) }
-        var relative = PathTemplate.render(options.albumFolderTemplate, values: albumValues)
+        var relative = PathTemplate.render(options.albumFolderTemplate, values: albumValues, ascii: options.asciiFileNames)
         if let total = album.discTotal, total > 1, let n = album.discNumber {
             relative += "/Disc \(n)"
         }
@@ -187,7 +188,7 @@ public actor ImageSplitter {
                 "title": title,
                 "artist": track.performer ?? album.albumArtist ?? "",
                 "album": albumValues["album"] ?? "",
-            ])
+            ], ascii: options.asciiFileNames)
             let url = outputFolder.appending(path: (name.isEmpty ? String(format: "%02d", track.number) : name) + ".flac", directoryHint: .notDirectory)
             if FileManager.default.fileExists(atPath: url.path) {
                 guard options.overwriteExisting else { throw SplitError.outputExists(url.lastPathComponent) }

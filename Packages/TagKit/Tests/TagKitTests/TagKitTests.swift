@@ -1,4 +1,5 @@
 import CoreGraphics
+import SplitKit
 import CryptoKit
 import Foundation
 import ImageIO
@@ -281,5 +282,58 @@ enum Fixtures {
         let before = try TaggedFile.read(url)
         print("real DSF tags:", before.tags.pairs.prefix(8).map { "\($0.name)=\($0.value)" }, "pictures:", before.pictures.map { "\($0.width)x\($0.height)" })
         try roundTrip(url)
+    }
+}
+
+@Suite("Organizer") struct OrganizerTests {
+    func tags(_ artist: String, _ album: String, _ title: String, track: Int, disc: Int = 1, discTotal: Int = 1, date: String = "1997-03-25") -> TagSet {
+        var t = TagSet()
+        t.set(TagField.albumArtist, artist); t.set(TagField.album, album); t.set(TagField.title, title)
+        t.set(TagField.trackNumber, String(track)); t.set(TagField.trackTotal, "12")
+        t.set(TagField.discNumber, String(disc)); t.set(TagField.discTotal, String(discTotal)); t.set(TagField.date, date)
+        return t
+    }
+
+    @Test func targetPathsFollowTemplatesAndASCII() {
+        let root = URL(fileURLWithPath: "/lib")
+        var o = LibraryOrganizer.Options()
+        let url = URL(fileURLWithPath: "/src/Album/01 - x.flac")
+        let t = tags("Björk", "Vespertine", "Hidden Place", track: 1)
+        #expect(LibraryOrganizer.target(for: url, tags: t, root: root, options: o).path == "/lib/Bjork/Vespertine (1997)/01 Hidden Place.flac")
+        o.asciiFileNames = false
+        #expect(LibraryOrganizer.target(for: url, tags: t, root: root, options: o).path == "/lib/Björk/Vespertine (1997)/01 Hidden Place.flac")
+        let multi = tags("Miles Davis", "Bitches Brew", "Pharaoh's Dance", track: 1, disc: 2, discTotal: 2)
+        #expect(LibraryOrganizer.target(for: url, tags: multi, root: root, options: o).path == "/lib/Miles Davis/Bitches Brew (1997)/Disc 2/01 Pharaoh's Dance.flac")
+        let mc = URL(fileURLWithPath: "/src/Album/Multichannel/01.dsf")
+        #expect(LibraryOrganizer.target(for: mc, tags: t, root: root, options: o).path.hasSuffix("/Vespertine (1997)/Multichannel/01 Hidden Place.dsf"))
+        let jp = tags("坂本龍一", "音楽図鑑", "Tibetan Dance", track: 3)
+        o.asciiFileNames = true
+        let p = LibraryOrganizer.target(for: url, tags: jp, root: root, options: o).path
+        #expect(p.unicodeScalars.allSatisfy(\.isASCII) && p.contains("03 Tibetan Dance.flac"), "\(p)")
+        #expect(PathTemplate.asciiSafe("Rock ’n’ Roll – Ñandú") == "Rock 'n' Roll - Nandu")
+    }
+
+    @Test func movesTracksAndSidecarsAndCleansUp() throws {
+        let dir = try Fixtures.tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let src = dir.appending(path: "incoming/Some Rip"), root = dir.appending(path: "Library")
+        try FileManager.default.createDirectory(at: src.appending(path: "Scans"), withIntermediateDirectories: true)
+        let a = src.appending(path: "a.wav"), b = src.appending(path: "b.wav")
+        try Fixtures.wav().write(to: a); try Fixtures.wav().write(to: b)
+        try Data("cue".utf8).write(to: src.appending(path: "rip.cue"))
+        try Data("img".utf8).write(to: src.appending(path: "Scans/back.jpg"))
+        try Data().write(to: src.appending(path: ".DS_Store"))
+        let files = [(url: a, tags: tags("Artist", "Album", "One", track: 1)), (url: b, tags: tags("Artist", "Album", "Two", track: 2))]
+        let plan = LibraryOrganizer.plan(files: files, root: root, options: LibraryOrganizer.Options())
+        #expect(plan.count == 2 && plan[0].to.path.hasSuffix("Artist/Album (1997)/01 One.wav"))
+        let moved = try LibraryOrganizer.perform(plan)
+        let target = root.appending(path: "Artist/Album (1997)")
+        #expect(FileManager.default.fileExists(atPath: target.appending(path: "02 Two.wav").path))
+        #expect(FileManager.default.fileExists(atPath: target.appending(path: "rip.cue").path), "sidecar moved")
+        #expect(FileManager.default.fileExists(atPath: target.appending(path: "Scans/back.jpg").path), "scan folder moved")
+        #expect(!FileManager.default.fileExists(atPath: src.path), "emptied source folder removed")
+        #expect(moved.count == 4)
+        // Already in place: nothing to do.
+        let again = LibraryOrganizer.plan(files: [(target.appending(path: "01 One.wav"), files[0].tags)], root: root, options: LibraryOrganizer.Options())
+        #expect(again.isEmpty)
     }
 }

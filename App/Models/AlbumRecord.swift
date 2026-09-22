@@ -45,6 +45,8 @@ final class AlbumRecord {
     var tagReportsData: Data?
     var taggedAt: Date?
     var coverOptionID: String?
+    // Phase 6: where the organizer moved files (old path → new path).
+    var fileMovesData: Data?
 
     init(detected: DetectedAlbum, issues: [ScanIssue] = []) {
         path = detected.id
@@ -126,6 +128,20 @@ final class AlbumRecord {
     var selectedCandidate: ScoredCandidate? {
         guard let id = selectedCandidateID else { return nil }
         return identification?.candidates.first { $0.id == id }
+    }
+
+    var fileMoves: [String: String] {
+        get { fileMovesData.flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:] }
+        set { fileMovesData = newValue.isEmpty ? nil : try? JSONEncoder().encode(newValue); updatedAt = Date() }
+    }
+
+    // Follows recorded moves so stored URLs still point at the files.
+    func resolved(_ url: URL) -> URL {
+        let moves = fileMoves
+        var path = url.path
+        var hops = 0
+        while let next = moves[path], hops < 8 { path = next; hops += 1 }
+        return path == url.path ? url : URL(fileURLWithPath: path)
     }
 
     var tagLocks: Set<String> {

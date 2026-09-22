@@ -101,7 +101,10 @@ extension ContentView {
         for record in library.allRecords() where record.isSplittable {
             var options = SplitOptions()
             options.overwriteExisting = true
-            await disc.split(record, into: destination, locator: settings.ffmpegLocator, options: options)
+            options.albumFolderTemplate = settings.albumFolderTemplate
+            options.trackFileTemplate = settings.trackFileTemplate
+            options.asciiFileNames = settings.asciiFileNames
+            await disc.split(record, into: destination, locator: settings.ffmpegLocator, options: options, trashOriginals: settings.moveOriginalsToTrash)
         }
     }
 }
@@ -115,7 +118,10 @@ extension ContentView {
             var options = SACDExtractOptions()
             options.overwriteExisting = true
             options.pausePolicy = settings.sacdPausePolicy
-            await disc.extractSACD(record, into: destination, multichannel: settings.extractMultichannel, options: options)
+            options.albumFolderTemplate = settings.albumFolderTemplate
+            options.trackFileTemplate = settings.trackFileTemplate
+            options.asciiFileNames = settings.asciiFileNames
+            await disc.extractSACD(record, into: destination, multichannel: settings.extractMultichannel, options: options, trashOriginals: settings.moveOriginalsToTrash)
         }
     }
 }

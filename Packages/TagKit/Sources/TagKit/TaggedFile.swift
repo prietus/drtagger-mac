@@ -7,6 +7,14 @@ public struct TagWriteReport: Sendable, Codable, Equatable, Hashable {
     public let audioDigest: String
     public let bytesWritten: Int64
     public let pictureCount: Int
+
+    public init(path: String, container: TagContainer, audioDigest: String, bytesWritten: Int64, pictureCount: Int) {
+        self.path = path; self.container = container; self.audioDigest = audioDigest; self.bytesWritten = bytesWritten; self.pictureCount = pictureCount
+    }
+
+    public func moved(to path: String) -> TagWriteReport {
+        TagWriteReport(path: path, container: container, audioDigest: audioDigest, bytesWritten: bytesWritten, pictureCount: pictureCount)
+    }
 }
 
 // Everything needed to put a file's metadata back exactly as it was.
@@ -22,6 +30,15 @@ public struct TagBackup: Sendable, Codable, Equatable, Hashable {
     public init(url: URL, container: TagContainer, contents: ContainerContents) {
         path = url.path; self.container = container; rawMetadata = contents.rawMetadata; audioDigest = contents.audioDigest
         tags = contents.tags; pictures = contents.pictures.map(PictureInfo.init); createdAt = Date()
+    }
+
+    public init(path: String, container: TagContainer, rawMetadata: Data, audioDigest: String, tags: TagSet, pictures: [PictureInfo], createdAt: Date) {
+        self.path = path; self.container = container; self.rawMetadata = rawMetadata; self.audioDigest = audioDigest
+        self.tags = tags; self.pictures = pictures; self.createdAt = createdAt
+    }
+
+    public func moved(to path: String) -> TagBackup {
+        TagBackup(path: path, container: container, rawMetadata: rawMetadata, audioDigest: audioDigest, tags: tags, pictures: pictures, createdAt: createdAt)
     }
 }
 

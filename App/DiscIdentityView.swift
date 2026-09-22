@@ -219,6 +219,9 @@ struct DiscIdentityView: View {
         }
         var options = SplitOptions()
         options.overwriteExisting = record.splitOutcome != nil
-        Task { await disc.split(record, into: destination, locator: settings.ffmpegLocator, options: options) }
+        options.albumFolderTemplate = settings.albumFolderTemplate
+        options.trackFileTemplate = settings.trackFileTemplate
+        options.asciiFileNames = settings.asciiFileNames
+        Task { await disc.split(record, into: destination, locator: settings.ffmpegLocator, options: options, trashOriginals: settings.moveOriginalsToTrash) }
     }
 }

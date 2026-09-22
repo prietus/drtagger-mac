@@ -28,6 +28,9 @@ settings:
     DEVELOPMENT_TEAM: LFTD9T269J
     SWIFT_EMIT_LOC_STRINGS: YES
     DEAD_CODE_STRIPPING: YES
+  configs:
+    Release:
+      OTHER_CODE_SIGN_FLAGS: "--timestamp"
 
 packages:
   FLACKit:
@@ -48,6 +51,8 @@ packages:
     path: Packages/IdentifyKit
   TagKit:
     path: Packages/TagKit
+  LoudnessKit:
+    path: Packages/LoudnessKit
 
 targets:
   drtagger:
@@ -76,6 +81,8 @@ targets:
         product: IdentifyKit
       - package: TagKit
         product: TagKit
+      - package: LoudnessKit
+        product: LoudnessKit
     info:
       path: App/Info.plist
       properties:

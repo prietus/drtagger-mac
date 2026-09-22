@@ -1,4 +1,5 @@
 import SACDKit
+import SplitKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -21,6 +22,14 @@ struct SettingsView: View {
 struct GeneralSettingsView: View {
     @Environment(AppSettings.self) private var settings
 
+    private var templatePreview: String {
+        let sample = ["albumartist": "Miles Davis", "album": "Kind of Blue", "year": "1997", "originalyear": "1959", "artist": "Miles Davis",
+                      "title": "So What", "track": "01", "tracktotal": "5", "disc": "1", "disctotal": "1", "label": "Columbia", "catalognumber": "CK 64935", "media": "CD"]
+        let folder = PathTemplate.render(settings.albumFolderTemplate, values: sample, ascii: settings.asciiFileNames)
+        let file = PathTemplate.render(settings.trackFileTemplate, values: sample, ascii: settings.asciiFileNames)
+        return (folder.isEmpty ? "?" : folder) + "/" + (file.isEmpty ? "?" : file) + ".flac"
+    }
+
     var body: some View {
         @Bindable var settings = settings
         Form {
@@ -40,6 +49,17 @@ struct GeneralSettingsView: View {
                     }
                 }
                 Toggle("Move original images to the Trash after a verified split", isOn: $settings.moveOriginalsToTrash)
+                TextField("Album folder", text: $settings.albumFolderTemplate)
+                TextField("Track file", text: $settings.trackFileTemplate)
+                Text(templatePreview)
+                    .font(.caption)
+                    .monospaced()
+                    .foregroundStyle(.secondary)
+                Text("Placeholders: " + PathTemplate.placeholders.map { "{\($0)}" }.joined(separator: " ") + ". Multi-disc releases get a \"Disc N\" folder automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("ASCII-only file names (transliterate accents and other scripts)", isOn: $settings.asciiFileNames)
+                Toggle("Move files into the library layout after Apply", isOn: $settings.organizeAfterApply)
             }
             Section("Queue") {
                 Toggle("Remember the queue between launches", isOn: $settings.keepQueueBetweenLaunches)
@@ -68,6 +88,7 @@ struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
             }
             Section("Tags") {
+                Toggle("Measure loudness and write ReplayGain / R128 tags on Apply", isOn: $settings.computeReplayGain)
                 Toggle("Write GENRE and STYLE from Discogs", isOn: $settings.writeGenresFromDiscogs)
                 Text("Fields taken from the chosen release replace the existing ones; everything else in the files (ReplayGain, comments, custom tags) is preserved. Individual fields can be locked in the preview.")
                     .font(.caption)

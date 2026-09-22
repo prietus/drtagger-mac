@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SACDKit
+import SplitKit
 
 // User-visible configuration that survives launches. Plain values live in
 // UserDefaults; provider credentials live in the Keychain. The app ships
@@ -27,6 +28,11 @@ final class AppSettings {
         static let embedFrontCover = "artwork.embedFrontCover"
         static let saveCoverFile = "artwork.saveCoverFile"
         static let genresFromDiscogs = "tags.genresFromDiscogs"
+        static let albumFolderTemplate = "library.albumFolderTemplate"
+        static let trackFileTemplate = "library.trackFileTemplate"
+        static let asciiFileNames = "library.asciiFileNames"
+        static let organizeAfterApply = "library.organizeAfterApply"
+        static let computeReplayGain = "tags.replayGain"
     }
 
     // Destination library root for split tracks. Empty = not configured.
@@ -72,6 +78,24 @@ final class AppSettings {
     var writeGenresFromDiscogs: Bool {
         didSet { defaults.set(writeGenresFromDiscogs, forKey: Key.genresFromDiscogs) }
     }
+    // Library layout: album folder and track file templates (phase 6).
+    var albumFolderTemplate: String {
+        didSet { defaults.set(albumFolderTemplate, forKey: Key.albumFolderTemplate) }
+    }
+    var trackFileTemplate: String {
+        didSet { defaults.set(trackFileTemplate, forKey: Key.trackFileTemplate) }
+    }
+    var asciiFileNames: Bool {
+        didSet { defaults.set(asciiFileNames, forKey: Key.asciiFileNames) }
+    }
+    // After Apply, move the files into the library layout using the final tags.
+    var organizeAfterApply: Bool {
+        didSet { defaults.set(organizeAfterApply, forKey: Key.organizeAfterApply) }
+    }
+    // Measure EBU R128 loudness on Apply and write ReplayGain / R128 tags.
+    var computeReplayGain: Bool {
+        didSet { defaults.set(computeReplayGain, forKey: Key.computeReplayGain) }
+    }
 
     var acoustIDKey: String {
         didSet { Self.store(acoustIDKey, account: KeychainAccount.acoustIDKey) }
@@ -98,6 +122,13 @@ final class AppSettings {
         embedFrontCover = defaults.object(forKey: Key.embedFrontCover) as? Bool ?? true
         saveCoverFile = defaults.object(forKey: Key.saveCoverFile) as? Bool ?? true
         writeGenresFromDiscogs = defaults.object(forKey: Key.genresFromDiscogs) as? Bool ?? true
+        let albumTemplate = defaults.string(forKey: Key.albumFolderTemplate) ?? ""
+        albumFolderTemplate = albumTemplate.isEmpty ? PathTemplate.defaultAlbumFolder : albumTemplate
+        let trackTemplate = defaults.string(forKey: Key.trackFileTemplate) ?? ""
+        trackFileTemplate = trackTemplate.isEmpty ? PathTemplate.defaultTrackFile : trackTemplate
+        asciiFileNames = defaults.object(forKey: Key.asciiFileNames) as? Bool ?? true
+        organizeAfterApply = defaults.object(forKey: Key.organizeAfterApply) as? Bool ?? true
+        computeReplayGain = defaults.object(forKey: Key.computeReplayGain) as? Bool ?? true
         acoustIDKey = Keychain.get(KeychainAccount.acoustIDKey) ?? ""
         discogsToken = Keychain.get(KeychainAccount.discogsToken) ?? ""
         fanartKey = Keychain.get(KeychainAccount.fanartKey) ?? ""

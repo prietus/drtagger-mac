@@ -16,6 +16,7 @@ Scope, decisions and delivery phases live in [DESIGN.md](DESIGN.md).
 | `Packages/SplitKit` | ffmpeg driver, verified CUE image splitting to FLAC, CUETools DB CRCs, path templates |
 | `Packages/SACDKit` | Scarletbook (SACD ISO) reader, frame reader, DSF writer, per-track extraction with ID3 tags |
 | `Packages/DSTKit` | DST decoder emitting DSD bits (Swift port of FFmpeg's dstdec.c, LGPL) |
+| `Packages/LoudnessKit` | EBU R128 loudness and true peak in Swift, ReplayGain 2 / R128 tags |
 | `Packages/TagKit` | Picard tag schema, mapping from a release, merge with locks, writers for FLAC/DSF/WAV/AIFF/DFF/APE/WV/TTA/ALAC with audio verification, backups and restore, artwork processing |
 | `Packages/IdentifyKit` | Release identification: artwork barcodes/OCR, tags, TOC, fingerprints, candidate scoring |
 | `Vendor/ffmpeg` | Minimal LGPL ffmpeg/ffprobe embedded in the app (built, not committed) |
@@ -82,3 +83,15 @@ notarization accept them.
 - DSTKit: LGPL 2.1+, a Swift port of FFmpeg's `libavcodec/dstdec.c`
 - ffmpeg: LGPL 2.1+; the exact tarball, checksum and configure line are in
   `Vendor/ffmpeg/BUILD-INFO.txt`
+
+## Release
+
+`scripts/release.sh` archives the app in Release with the Developer ID
+certificate, exports it, notarizes the zip with `notarytool` and staples the
+ticket. One-time setup:
+
+```
+xcrun notarytool store-credentials drtagger-notary --apple-id <apple id> --team-id LFTD9T269J
+```
+
+`SKIP_NOTARIZE=1 scripts/release.sh` only archives and verifies the signature.

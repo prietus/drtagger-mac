@@ -8,17 +8,33 @@ public enum PathTemplate {
     public static let defaultAlbumFolder = "{albumartist}/{album} ({year})"
     public static let defaultTrackFile = "{track} {title}"
 
-    public static func render(_ template: String, values: [String: String]) -> String {
+    // Placeholders every caller can rely on (case-insensitive in templates).
+    public static let placeholders = ["albumartist", "album", "year", "originalyear", "artist", "title", "track", "tracktotal", "disc", "disctotal", "label", "catalognumber", "media"]
+
+    public static func render(_ template: String, values: [String: String], ascii: Bool = false) -> String {
         // Split on the template's own slashes first so a value containing
         // "/" can never create an extra folder.
         template
             .split(separator: "/", omittingEmptySubsequences: true)
-            .map { renderComponent(String($0), values: values) }
+            .map { renderComponent(String($0), values: values, ascii: ascii) }
             .filter { !$0.isEmpty }
             .joined(separator: "/")
     }
 
-    static func renderComponent(_ template: String, values: [String: String]) -> String {
+    // "Björk – Vespertine (日本)" → "Bjork - Vespertine (ri ben)": Latin
+    // transliteration, diacritics stripped, typographic punctuation
+    // replaced, anything else outside printable ASCII dropped.
+    public static func asciiSafe(_ s: String) -> String {
+        var t = s.applyingTransform(.toLatin, reverse: false) ?? s
+        t = t.applyingTransform(.stripDiacritics, reverse: false) ?? t
+        t = t.folding(options: [.diacriticInsensitive, .widthInsensitive], locale: nil)
+        let replacements: [String: String] = ["–": "-", "—": "-", "‘": "'", "’": "'", "‚": "'", "“": "\"", "”": "\"", "„": "\"", "…": "...", "×": "x", "ß": "ss", "æ": "ae", "Æ": "AE", "ø": "o", "Ø": "O", "œ": "oe", "Œ": "OE", "đ": "d", "Đ": "D", "ł": "l", "Ł": "L", "ı": "i", "·": "-", "／": "-", "＆": "&"]
+        for (from, to) in replacements { t = t.replacingOccurrences(of: from, with: to) }
+        t = t.unicodeScalars.map { $0.isASCII && $0.value >= 32 && $0.value < 127 ? String($0) : " " }.joined()
+        return t.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+    }
+
+    static func renderComponent(_ template: String, values: [String: String], ascii: Bool = false) -> String {
         var out = ""
         var rest = Substring(template)
         while let open = rest.firstIndex(of: "{") {
@@ -33,7 +49,7 @@ public enum PathTemplate {
             rest = rest[rest.index(after: close)...]
         }
         out += rest
-        return sanitizeComponent(out)
+        return sanitizeComponent(ascii ? asciiSafe(out) : out)
     }
 
     // One path component: no slashes or colons, no control characters, no

@@ -20,6 +20,24 @@ public struct FingerprintOutcome: Sendable, Codable, Hashable {
     public let tracksWithHits: Int
     public let votes: [ReleaseVote]           // after the consensus filter, best first
     public let recordingIDs: [Int: String]    // local track index → recording MBID of the best hit
+    public let acoustIDs: [Int: String]       // local track index → AcoustID id of the best hit
+
+    public init(fingerprintedTracks: Int, tracksWithHits: Int, votes: [ReleaseVote], recordingIDs: [Int: String], acoustIDs: [Int: String] = [:]) {
+        self.fingerprintedTracks = fingerprintedTracks
+        self.tracksWithHits = tracksWithHits
+        self.votes = votes
+        self.recordingIDs = recordingIDs
+        self.acoustIDs = acoustIDs
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        fingerprintedTracks = try c.decode(Int.self, forKey: .fingerprintedTracks)
+        tracksWithHits = try c.decode(Int.self, forKey: .tracksWithHits)
+        votes = try c.decode([ReleaseVote].self, forKey: .votes)
+        recordingIDs = try c.decodeIfPresent([Int: String].self, forKey: .recordingIDs) ?? [:]
+        acoustIDs = try c.decodeIfPresent([Int: String].self, forKey: .acoustIDs) ?? [:]
+    }
 
     public var coverage: Double {
         guard fingerprintedTracks > 0, let best = votes.first else { return 0 }
@@ -86,11 +104,13 @@ public struct FingerprintService: Sendable {
         var scores: [String: Double] = [:]
         var trackHits: [String: Set<Int>] = [:]
         var recordingIDs: [Int: String] = [:]
+        var acoustIDs: [Int: String] = [:]
         var tracksWithHits = 0
         for hit in hits where !hit.matches.isEmpty {
             tracksWithHits += 1
             if let best = hit.matches.max(by: { $0.score < $1.score }) {
                 recordingIDs[hit.index] = best.recordingID
+                if let id = best.acoustID { acoustIDs[hit.index] = id }
             }
             for m in hit.matches {
                 for r in m.releaseIDs {
@@ -101,7 +121,7 @@ public struct FingerprintService: Sendable {
         }
         let votes = Self.consensus(scores: scores, trackHits: trackHits, trackCount: fingerprinted)
         log("AcoustID: \(tracksWithHits) of \(fingerprinted) tracks matched; \(votes.count) release(s) after consensus.")
-        return FingerprintOutcome(fingerprintedTracks: fingerprinted, tracksWithHits: tracksWithHits, votes: votes, recordingIDs: recordingIDs)
+        return FingerprintOutcome(fingerprintedTracks: fingerprinted, tracksWithHits: tracksWithHits, votes: votes, recordingIDs: recordingIDs, acoustIDs: acoustIDs)
     }
 
     // Keeps releases hit by at least half of the maximum hit count (and at
