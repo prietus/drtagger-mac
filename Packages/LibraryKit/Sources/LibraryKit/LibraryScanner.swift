@@ -95,7 +95,7 @@ public struct DetectedAlbum: Sendable, Equatable, Codable, Hashable, Identifiabl
     // What siblings of one set share: the name without its disc token, or
     // the SACD album title.
     public var setBaseName: String {
-        if let sacd, sacd.albumSetSize > 1, let title = sacd.albumTitle, !title.isEmpty { return title }
+        if let sacd, sacd.albumSetSize > 1, let title = sacd.albumTitle, !title.isEmpty { return FileRules.strippingDiscToken(title) }
         return FileRules.strippingDiscToken(folderName)
     }
 

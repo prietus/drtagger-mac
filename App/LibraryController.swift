@@ -195,9 +195,12 @@ final class LibraryController {
     private func setKey(_ record: AlbumRecord) -> String? {
         guard let detected = record.detected, detected.discPosition != nil else { return nil }
         if let sacd = detected.sacd, sacd.albumSetSize > 1 {
-            let title = (sacd.albumTitle ?? "").lowercased().trimmingCharacters(in: .whitespaces)
+            // The album catalog (often the box barcode) is shared by every
+            // disc; titles may carry "Disc N of M", so they come second.
             let catalog = sacd.albumCatalogNumber.lowercased().trimmingCharacters(in: .whitespaces)
-            if !catalog.isEmpty || !title.isEmpty { return "sacd|\(catalog)|\(title)" }
+            if !catalog.isEmpty { return "sacd|cat|\(catalog)|\(sacd.albumSetSize)" }
+            let title = detected.setBaseName.lowercased().trimmingCharacters(in: .whitespaces)
+            if !title.isEmpty { return "sacd|title|\(title)|\(sacd.albumSetSize)" }
         }
         return "name|" + record.url.deletingLastPathComponent().path + "|" + detected.setBaseName.lowercased()
     }
@@ -208,16 +211,21 @@ final class LibraryController {
     // of one so the missing discs are visible.
     private func autoGroup(_ records: [AlbumRecord]) {
         let all = allRecords()
-        for r in records where r.setID == nil {
+        // A set of one (a lone "disc 2 of 4") is still open to its siblings.
+        func loose(_ r: AlbumRecord) -> Bool { r.setID == nil || members(of: r).count == 1 }
+        for r in records where loose(r) {
             guard let key = setKey(r) else { continue }
             let peers = all.filter { $0.path != r.path && setKey($0) == key }
             let mine = r.detected?.discPosition?.number
-            if let existing = peers.first(where: { $0.setID != nil }) {
+            if let existing = peers.first(where: { !loose($0) }) {
                 let taken = members(of: existing).compactMap(\.setPosition)
                 if let mine, taken.contains(mine) { continue }        // same disc twice: leave it alone
                 join(r, to: existing)
             } else {
-                let group = [r] + peers.filter { $0.setID == nil }
+                let group = [r] + peers.filter { loose($0) }
+                if group.count > 1, group.contains(where: { $0.setID != nil }) {
+                    for g in group { g.setID = nil }
+                }
                 let declared = group.compactMap { $0.detected?.discPosition?.total }.max()
                 guard group.count > 1 || (declared ?? 0) > 1 else { continue }
                 let positions = group.compactMap { $0.detected?.discPosition?.number }

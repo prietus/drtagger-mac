@@ -66,6 +66,18 @@ struct LibraryControllerTests {
         await controller.addRoots([root.appending(path: "Box/Led Zeppelin - Box Set (Disc 3)")])
         let disc3 = try #require(controller.allRecords().first { $0.path.hasSuffix("(Disc 3)") })
         #expect(disc3.setID == disc1.setID && disc3.setPosition == 3 && disc1.setTotal == 3)
+
+        // A lone disc that formed a set of one is regrouped when its sibling arrives.
+        let loneRoot = root.appending(path: "Lone")
+        try fm.createDirectory(at: loneRoot.appending(path: "Opera - Disc 1 of 2"), withIntermediateDirectories: true)
+        try Data(count: 4).write(to: loneRoot.appending(path: "Opera - Disc 1 of 2/01.flac"))
+        await controller.addRoots([loneRoot.appending(path: "Opera - Disc 1 of 2")])
+        let lone = try #require(controller.allRecords().first { $0.path.hasSuffix("Disc 1 of 2") })
+        #expect(lone.setID != nil && controller.members(of: lone).count == 1)
+        try fm.createDirectory(at: loneRoot.appending(path: "Opera - Disc 2 of 2"), withIntermediateDirectories: true)
+        try Data(count: 4).write(to: loneRoot.appending(path: "Opera - Disc 2 of 2/01.flac"))
+        await controller.addRoots([loneRoot.appending(path: "Opera - Disc 2 of 2")])
+        #expect(controller.members(of: lone).count == 2)
     }
 
     @Test func addRootsStoresEveryDetectedAlbum() async throws {

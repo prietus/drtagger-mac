@@ -269,6 +269,13 @@ struct MatchScorerTests {
         #expect(MatchScorer.score(box, signals: whole, origins: [.textSearch], fingerprintVote: nil, fingerprintedTracks: 0).trackCountMatches == true)
     }
 
+    @Test func numericCatalogIsABarcode() {
+        var s = AlbumSignals()
+        s.catalogNumbers = [SignalValue("4988006888883", origin: .sacdText), SignalValue("TOGE-12061", origin: .sacdText)]
+        #expect(s.uniqueBarcodes == ["4988006888883"])
+        #expect(s.uniqueCatalogNumbers == ["TOGE-12061"])
+    }
+
     @Test func normalisation() {
         #expect(MatchScorer.normalize("The Rolling Stones") == "rolling stones")
         #expect(MatchScorer.normalize("Leño – ¡Corre, corre!") == "leno corre corre")

@@ -63,7 +63,13 @@ public struct FingerprintService: Sendable {
     }
 
     public func run(tracks: [LocalTrack], log: @escaping @Sendable (String) -> Void = { _ in }) async -> FingerprintOutcome {
-        let candidates = tracks.filter { $0.url != nil }
+        let allCandidates = tracks.filter { $0.url != nil }
+        // A SACD image is not something ffmpeg can decode: its tracks are
+        // fingerprinted from the extracted DSFs, or not at all.
+        let candidates = allCandidates.filter { $0.url?.pathExtension.lowercased() != "iso" }
+        if candidates.count < allCandidates.count {
+            log("Fingerprints skipped for \(allCandidates.count - candidates.count) track(s) inside a SACD image: extract the disc to fingerprint it.")
+        }
         guard !candidates.isEmpty else {
             return FingerprintOutcome(fingerprintedTracks: 0, tracksWithHits: 0, votes: [], recordingIDs: [:])
         }

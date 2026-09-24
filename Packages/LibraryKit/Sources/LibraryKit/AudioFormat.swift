@@ -108,8 +108,15 @@ public enum FileRules {
         pattern: #"(?:^|[\s\(\[_\-.])(?:cd|disc|disco|disk|dvd)\s*[-_.#]?\s*(\d{1,2})(?:\s*(?:of|de|-|/)\s*(\d{1,2}))?(?=$|[\s\)\]_\-.,])"#,
         options: [.caseInsensitive])
 
+    // "Box (Disc 2).cue" → "Box (Disc 2)", but "Cantatas Vol. 40" stays whole.
+    static func withoutFileExtension(_ name: String) -> String {
+        let ext = (name as NSString).pathExtension
+        guard ext.range(of: #"^[A-Za-z0-9]{2,5}$"#, options: .regularExpression) != nil, ext.contains(where: \.isLetter) else { return name }
+        return (name as NSString).deletingPathExtension
+    }
+
     public static func discNumber(fromFileName name: String) -> (number: Int, total: Int?)? {
-        let base = (name as NSString).deletingPathExtension
+        let base = withoutFileExtension(name)
         let range = NSRange(base.startIndex..., in: base)
         guard let m = discTokenPattern.firstMatch(in: base, range: range), let n = Range(m.range(at: 1), in: base), let number = Int(base[n]) else { return nil }
         let total = Range(m.range(at: 2), in: base).flatMap { Int(base[$0]) }
@@ -119,7 +126,7 @@ public enum FileRules {
     // The name without its disc token, so siblings of one set compare equal:
     // "Led Zeppelin - Box Set (Disc 2)" → "Led Zeppelin - Box Set".
     public static func strippingDiscToken(_ name: String) -> String {
-        let base = (name as NSString).deletingPathExtension
+        let base = withoutFileExtension(name)
         let range = NSRange(base.startIndex..., in: base)
         guard let m = discTokenPattern.firstMatch(in: base, range: range), var r = Range(m.range, in: base) else { return base }
         var t = base

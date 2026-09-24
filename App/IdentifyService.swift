@@ -59,11 +59,11 @@ final class IdentifyService {
         if members.count > 1 {
             // A release set: every disc's signals, matched medium by medium.
             let setMembers = members.compactMap { m -> SignalCollector.SetMember? in
-                m.detected.map { SignalCollector.SetMember(album: $0, position: m.setPosition ?? 1, toc: m.toc) }
+                m.detected.map { SignalCollector.SetMember(album: $0, position: m.setPosition ?? 1, toc: m.toc, extractedTracks: Self.extractedStereoTracks(m)) }
             }
             result = await identifier.identify(set: setMembers, declaredTotal: members.first?.setTotal, ctdb: ctdb, progress: progress)
         } else {
-            result = await identifier.identify(album: album, toc: toc, ctdb: ctdb, progress: progress)
+            result = await identifier.identify(album: album, toc: toc, ctdb: ctdb, extractedTracks: Self.extractedStereoTracks(record), progress: progress)
         }
         let selected: String?
         let state: AlbumState
@@ -82,6 +82,12 @@ final class IdentifyService {
         for p in paths { activity[p] = nil }
         _ = path
         try? record.modelContext?.save()
+    }
+
+    // DSFs extracted from a SACD image's stereo area, following any moves.
+    static func extractedStereoTracks(_ record: AlbumRecord) -> [URL] {
+        guard record.kind == .sacdISO, let stereo = record.sacdOutcomes.first(where: { !$0.isMultichannel }) else { return [] }
+        return stereo.tracks.sorted { $0.number < $1.number }.map { record.resolved($0.url) }
     }
 
     static func launchArgument(_ name: String, arguments: [String] = CommandLine.arguments) -> String? {

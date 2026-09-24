@@ -66,6 +66,7 @@ public actor Identifier {
         album: DetectedAlbum,
         toc: DiscTOC? = nil,
         ctdb: [CUEToolsDBClient.Metadata] = [],
+        extractedTracks: [URL] = [],
         progress: @escaping @Sendable (IdentifyProgress) -> Void = { _ in }
     ) async -> IdentificationResult {
         let started = Date()
@@ -75,7 +76,7 @@ public actor Identifier {
         progress(IdentifyProgress(fraction: 0.05, message: "Reading signals"))
         var options = SignalCollector.Options()
         options.scanArtwork = config.scanArtwork
-        let signals = await SignalCollector(tool: tool).collect(album: album, toc: toc, ctdb: ctdb, options: options, log: log)
+        let signals = await SignalCollector(tool: tool).collect(album: album, toc: toc, ctdb: ctdb, extractedTracks: extractedTracks, options: options, log: log)
         return await pipeline(signals: signals, started: started, logBox: logBox, progress: progress)
     }
 

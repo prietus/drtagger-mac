@@ -93,8 +93,14 @@ public struct AlbumSignals: Sendable, Codable, Hashable {
     // A partial or declared set: candidates are matched medium by medium.
     public var isSet: Bool { presentDiscs != [1] || declaredDiscTotal != nil }
     public var allDiscIDs: Set<String> { Set(discIDs.values).union(discID.map { [$0] } ?? []) }
-    public var uniqueBarcodes: [String] { unique(barcodes.map(\.value)) }
-    public var uniqueCatalogNumbers: [String] { unique(catalogNumbers.map(\.value)) }
+    // An all-digit 12–14 character "catalog number" is an EAN/UPC (SACD
+    // album catalogs often hold the box barcode): search it as a barcode.
+    static func looksLikeBarcode(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        return (12...14).contains(t.count) && t.allSatisfy(\.isNumber)
+    }
+    public var uniqueBarcodes: [String] { unique(barcodes.map(\.value) + catalogNumbers.map(\.value).filter(Self.looksLikeBarcode)) }
+    public var uniqueCatalogNumbers: [String] { unique(catalogNumbers.map(\.value).filter { !Self.looksLikeBarcode($0) }) }
     public var uniqueReleaseIDs: [String] { unique(mbReleaseIDs.map(\.value)) }
 
     private func unique(_ values: [String]) -> [String] {
@@ -122,6 +128,7 @@ public struct SignalCollector: Sendable {
         album: DetectedAlbum,
         toc: DiscTOC? = nil,
         ctdb: [CUEToolsDBClient.Metadata] = [],
+        extractedTracks: [URL] = [],
         options: Options = Options(),
         log: @escaping @Sendable (String) -> Void = { _ in }
     ) async -> AlbumSignals {
@@ -190,7 +197,7 @@ public struct SignalCollector: Sendable {
         }
 
         // Tracks with durations.
-        s.tracks = await localTracks(album: album, toc: toc, log: log)
+        s.tracks = await localTracks(album: album, toc: toc, extractedTracks: extractedTracks, log: log)
 
         // Existing tags (first track file) and SACD texts.
         if album.kind == .sacdISO {
@@ -198,7 +205,7 @@ public struct SignalCollector: Sendable {
             s.isSACDImage = true
             if let disc = try? SACDDiscReader.read(url: album.url) {
                 if let a = disc.artist { s.artistHint = a }
-                if let t = disc.title { s.albumHint = t }
+                if let t = disc.title { s.albumHint = FileRules.strippingDiscToken(t) }
                 if let y = disc.year { s.yearHint = y }
                 let cat = disc.info.discCatalogNumber
                 if !cat.isEmpty { s.catalogNumbers.append(SignalValue(cat, origin: .sacdText)) }
@@ -286,11 +293,13 @@ public struct SignalCollector: Sendable {
         public let album: DetectedAlbum
         public let position: Int          // 1-based disc position in the release
         public let toc: DiscTOC?
+        public let extractedTracks: [URL] // DSFs extracted from a SACD image, in track order
 
-        public init(album: DetectedAlbum, position: Int, toc: DiscTOC? = nil) {
+        public init(album: DetectedAlbum, position: Int, toc: DiscTOC? = nil, extractedTracks: [URL] = []) {
             self.album = album
             self.position = position
             self.toc = toc
+            self.extractedTracks = extractedTracks
         }
     }
 
@@ -307,7 +316,7 @@ public struct SignalCollector: Sendable {
         var merged: AlbumSignals? = nil
         var seenBarcodes = Set<String>(), seenCatalogs = Set<String>(), seenMBIDs = Set<String>()
         for member in ordered {
-            var part = await collect(album: member.album, toc: member.toc, ctdb: ctdb, options: options, log: log)
+            var part = await collect(album: member.album, toc: member.toc, ctdb: ctdb, extractedTracks: member.extractedTracks, options: options, log: log)
             part.tracks = part.tracks.map { LocalTrack(index: $0.index, discNumber: member.position, title: $0.title, durationSeconds: $0.durationSeconds, url: $0.url, imageStart: $0.imageStart) }
             if var m = merged {
                 let base = m.tracks.count
@@ -335,7 +344,7 @@ public struct SignalCollector: Sendable {
         s.discCount = max(s.declaredDiscTotal ?? 0, ordered.map(\.position).max() ?? 1)
         // The box title beats a disc title ("Piano Sonatas" over "Sonatas 1–7").
         if let first = ordered.first?.album, let sacd = first.sacd, let box = sacd.albumTitle, !box.isEmpty {
-            s.albumHint = box
+            s.albumHint = FileRules.strippingDiscToken(box)
             if let artist = sacd.albumArtist, !artist.isEmpty { s.artistHint = artist }
         } else if let first = ordered.first?.album {
             let parsed = FolderNameParser.parse(FileRules.strippingDiscToken(first.folderName))
@@ -359,12 +368,15 @@ public struct SignalCollector: Sendable {
 
     // MARK: Tracks
 
-    private func localTracks(album: DetectedAlbum, toc: DiscTOC?, log: @escaping @Sendable (String) -> Void) async -> [LocalTrack] {
+    private func localTracks(album: DetectedAlbum, toc: DiscTOC?, extractedTracks: [URL], log: @escaping @Sendable (String) -> Void) async -> [LocalTrack] {
         var tracks: [LocalTrack] = []
         if album.kind == .sacdISO {
             guard let disc = try? SACDDiscReader.read(url: album.url), let area = disc.stereoArea else { return [] }
-            for t in area.tracks {
-                tracks.append(LocalTrack(index: tracks.count, discNumber: 1, title: t.title, durationSeconds: t.duration.totalSeconds, url: album.url))
+            // Durations from the TOC; audio from the extracted DSFs when there
+            // are some (ffmpeg cannot read a Scarletbook image).
+            let files = extractedTracks.count == area.tracks.count ? extractedTracks : []
+            for (i, t) in area.tracks.enumerated() {
+                tracks.append(LocalTrack(index: tracks.count, discNumber: 1, title: t.title, durationSeconds: t.duration.totalSeconds, url: files.isEmpty ? album.url : files[i]))
             }
             return tracks
         }

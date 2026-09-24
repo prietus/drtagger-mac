@@ -82,6 +82,9 @@ struct LibraryScannerTests {
         #expect(FileRules.strippingDiscToken("Led Zeppelin - Box Set (Disc 2)") == "Led Zeppelin - Box Set")
         #expect(FileRules.strippingDiscToken("CANCIONEROS  Colombina  1451-1595 (disc 1-3).iso") == "CANCIONEROS Colombina 1451-1595")
         #expect(FileRules.strippingDiscToken("Don Giovanni CD2") == "Don Giovanni")
+        #expect(FileRules.strippingDiscToken("DEBUSSY: PIANO WORKS - Disc 1 of 4") == "DEBUSSY: PIANO WORKS")
+        #expect(FileRules.strippingDiscToken("Bach - Cantatas Vol. 40") == "Bach - Cantatas Vol. 40", "a volume number is not an extension")
+        #expect(FileRules.discNumber(fromFileName: "DEBUSSY_ PIANO WORKS - Disc 3 of 4 (disc 3-4).iso")?.total == 4)
     }
 
     @Test func trackFolderWithArtwork() throws {
