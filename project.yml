@@ -88,6 +88,8 @@ targets:
       properties:
         CFBundleName: drtagger
         CFBundleDisplayName: drtagger
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: "15.0"
         LSApplicationCategoryType: public.app-category.music
         NSHumanReadableCopyright: "Copyright © 2026. All rights reserved."
