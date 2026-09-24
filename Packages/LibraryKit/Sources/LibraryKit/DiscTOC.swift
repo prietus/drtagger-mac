@@ -59,8 +59,8 @@ public struct DiscTOC: Sendable, Equatable, Codable, Hashable {
         var lastNumber = 0
         for (fileIndex, file) in cue.files.enumerated() {
             for track in file.tracks {
-                guard let start = track.start else { throw TOCError.missingIndex01(track: track.number) }
-                let absolute = fileStart[fileIndex] + start.frames + DiscTOC.leadInFrames
+                guard let start = track.start, fileIndex + track.startFileOffset < fileStart.count else { throw TOCError.missingIndex01(track: track.number) }
+                let absolute = fileStart[fileIndex + track.startFileOffset] + start.frames + DiscTOC.leadInFrames
                 if track.isAudio {
                     if let last = offsets.last, absolute < last { throw TOCError.notMonotonic(track: track.number) }
                     offsets.append(absolute)

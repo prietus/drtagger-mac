@@ -42,10 +42,23 @@ public struct CueTime: Sendable, Equatable, Hashable, Codable, Comparable {
 public struct CueIndex: Sendable, Equatable, Hashable, Codable {
     public let number: Int
     public let time: CueTime
+    // 0 when the time is relative to the track's own FILE. EAC's "gaps
+    // appended to previous track" sheets put a track's INDEX 00 at the end
+    // of one file and its INDEX 01 after the next FILE line: that index is
+    // relative to a later file, `fileOffset` files after the track's.
+    public let fileOffset: Int
 
-    public init(number: Int, time: CueTime) {
+    public init(number: Int, time: CueTime, fileOffset: Int = 0) {
         self.number = number
         self.time = time
+        self.fileOffset = fileOffset
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        number = try c.decode(Int.self, forKey: .number)
+        time = try c.decode(CueTime.self, forKey: .time)
+        fileOffset = try c.decodeIfPresent(Int.self, forKey: .fileOffset) ?? 0
     }
 }
 
@@ -78,6 +91,8 @@ public struct CueTrack: Sendable, Equatable, Hashable, Codable {
 
     // INDEX 01 is where players start the track; INDEX 00 marks its pregap.
     public var start: CueTime? { index(1) }
+    // How many FILEs after the track's own FILE its INDEX 01 is measured in.
+    public var startFileOffset: Int { indexes.first { $0.number == 1 }?.fileOffset ?? 0 }
     public var pregapStart: CueTime? { index(0) }
 }
 
@@ -211,6 +226,7 @@ public struct CueSheet: Sendable, Equatable, Hashable, Codable {
         var sheet = CueSheet()
         var fileIndex: Int? = nil
         var trackIndex: Int? = nil
+        var lastTrack: (file: Int, track: Int)? = nil   // survives a FILE line
         var lineNumber = 0
         var sawAnything = false
 
@@ -256,11 +272,17 @@ public struct CueSheet: Sendable, Equatable, Hashable, Codable {
                 let type = args.count >= 2 ? args[1].uppercased() : "AUDIO"
                 sheet.files[fi].tracks.append(CueTrack(number: number, type: type))
                 trackIndex = sheet.files[fi].tracks.count - 1
+                lastTrack = (fi, trackIndex!)
 
             case "INDEX":
-                guard let fi = fileIndex, let ti = trackIndex, args.count >= 2,
-                      let n = Int(args[0]), let time = CueTime(msf: args[1]) else { continue }
-                sheet.files[fi].tracks[ti].indexes.append(CueIndex(number: n, time: time))
+                guard let fi = fileIndex, args.count >= 2, let n = Int(args[0]), let time = CueTime(msf: args[1]) else { continue }
+                if let ti = trackIndex {
+                    sheet.files[fi].tracks[ti].indexes.append(CueIndex(number: n, time: time))
+                } else if let last = lastTrack {
+                    // INDEX after a new FILE and before any TRACK: it still
+                    // belongs to the previous track, measured in this file.
+                    sheet.files[last.file].tracks[last.track].indexes.append(CueIndex(number: n, time: time, fileOffset: fi - last.file))
+                }
 
             case "PREGAP", "POSTGAP":
                 guard let fi = fileIndex, let ti = trackIndex, let arg = args.first,

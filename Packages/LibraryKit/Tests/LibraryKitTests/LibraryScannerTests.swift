@@ -70,6 +70,37 @@ struct LibraryScannerTests {
         #expect(r2.albums.count == 1 && r2.issues.contains { $0.message.contains("ignored") })
     }
 
+    @Test func gapsAppendedToPreviousTrackCue() throws {
+        // EAC "gaps appended": track 2's INDEX 00 ends file 1, its INDEX 01
+        // follows the FILE line of file 2 (Live At The Fillmore, disc 2).
+        let text = """
+        FILE "01.flac" WAVE
+          TRACK 01 AUDIO
+            TITLE "Tell The Truth"
+            INDEX 01 00:00:00
+          TRACK 02 AUDIO
+            TITLE "Nobody Knows You"
+            INDEX 00 11:04:71
+        FILE "02.flac" WAVE
+            INDEX 01 00:00:00
+        FILE "03.flac" WAVE
+          TRACK 03 AUDIO
+            TITLE "Roll It Over"
+            INDEX 01 00:00:00
+        """
+        let cue = try CueSheet.parse(text: text)
+        let t2 = try #require(cue.audioTracks.first { $0.number == 2 })
+        #expect(t2.title == "Nobody Knows You" && t2.start?.frames == 0 && t2.startFileOffset == 1)
+        #expect(t2.index(0)?.frames == (11 * 60 + 4) * 75 + 71)
+        #expect(cue.files[1].tracks.isEmpty)
+
+        let f1 = (11 * 60 + 5) * 75, f2 = 3000, f3 = 4000
+        let toc = try DiscTOC(cue: cue, fileFrames: [f1, f2, f3])
+        #expect(toc.trackOffsets == [150, 150 + f1, 150 + f1 + f2])
+        let plan = try CueSplitPlan.make(cue: cue, fileSampleCounts: [f1, f2, f3].map { Int64($0 * 588) }, sampleRate: 44100)
+        #expect(plan.numberedTracks.map(\.startSample) == [0, Int64(f1 * 588), Int64((f1 + f2) * 588)])
+    }
+
     @Test func discTokensInNames() {
         #expect(FileRules.discNumber(fromFileName: "Led Zeppelin - Box Set (Disc 2).cue")?.number == 2)
         let n = FileRules.discNumber(fromFileName: "CANCIONEROS DEL SIGLO DE ORO  Colombina  1451-1595 (disc 1-3).iso")

@@ -87,9 +87,10 @@ public struct CueSplitPlan: Sendable, Equatable, Codable, Hashable {
         var starts: [Start] = []
         for (fileIndex, file) in cue.files.enumerated() {
             for track in file.tracks where track.isAudio {
-                guard let index01 = track.start else { throw PlanError.missingIndex01(track: track.number) }
-                let sample = fileStart[fileIndex] + Int64(index01.frames) * samplesPerFrame
-                guard sample <= fileStart[fileIndex] + fileSampleCounts[fileIndex] else {
+                let startFile = fileIndex + track.startFileOffset
+                guard let index01 = track.start, startFile < fileStart.count else { throw PlanError.missingIndex01(track: track.number) }
+                let sample = fileStart[startFile] + Int64(index01.frames) * samplesPerFrame
+                guard sample <= fileStart[startFile] + fileSampleCounts[startFile] else {
                     throw PlanError.indexBeyondFile(track: track.number)
                 }
                 if let last = starts.last, sample < last.sample { throw PlanError.notMonotonic(track: track.number) }
