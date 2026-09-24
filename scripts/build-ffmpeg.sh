@@ -162,7 +162,8 @@ fi
     echo "archs   $ARCHS (macOS >= $MACOS_MIN)"
     echo "license LGPL 2.1 or later (no GPL / non-free components)"
     echo
-    echo "$CONFIGURE_LINES"
+    # Paths relative to the repository so the file carries no local user paths.
+    echo "${CONFIGURE_LINES//$ROOT/<repo>}"
 } > "$OUT/BUILD-INFO.txt"
 
 echo "==> Done"

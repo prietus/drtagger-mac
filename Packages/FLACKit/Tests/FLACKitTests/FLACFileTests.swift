@@ -23,7 +23,7 @@ struct FLACFileTests {
 
     @Test("parses a real FLAC fixture if present")
     func parsesFixture() throws {
-        guard let url = Bundle.module.url(forResource: "sample", withExtension: "flac") else {
+        guard let url = Bundle.module.url(forResource: "tone", withExtension: "flac") else {
             return
         }
         let file = try FLACFile(url: url)
@@ -35,7 +35,7 @@ struct FLACFileTests {
 
     @Test("dump fixture contents")
     func dumpFixture() throws {
-        guard let url = Bundle.module.url(forResource: "sample", withExtension: "flac") else {
+        guard let url = Bundle.module.url(forResource: "tone", withExtension: "flac") else {
             return
         }
         let file = try FLACFile(url: url)

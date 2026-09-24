@@ -8,7 +8,7 @@ struct WriteTests {
 
     @Test("round-trip preserves audio bytes and new tags")
     func roundTrip() throws {
-        guard let url = Bundle.module.url(forResource: "sample", withExtension: "flac") else {
+        guard let url = Bundle.module.url(forResource: "tone", withExtension: "flac") else {
             return
         }
         let original = try FileHandleDataSource(url: url)
@@ -21,7 +21,7 @@ struct WriteTests {
         // Mutate a field we know exists and add a new one.
         var newFields = oldTags.fields
         if let i = newFields.firstIndex(where: { $0.name == "TITLE" }) {
-            newFields[i].value = "T.N.T. (drtagger test)"
+            newFields[i].value = "Test Tone (drtagger test)"
         }
         newFields.append((name: "DRTAGGER_TEST", value: "ok"))
         let newTags = VorbisComment(vendor: oldTags.vendor, fields: newFields)
@@ -30,9 +30,9 @@ struct WriteTests {
 
         // Re-parse the rewritten bytes and verify the new tags are there.
         let reparsed = try FLACFile(data: rewritten)
-        #expect(reparsed.vorbisComment?["TITLE"] == ["T.N.T. (drtagger test)"])
+        #expect(reparsed.vorbisComment?["TITLE"] == ["Test Tone (drtagger test)"])
         #expect(reparsed.vorbisComment?["DRTAGGER_TEST"] == ["ok"])
-        #expect(reparsed.vorbisComment?["ARTIST"] == ["AC-DC"])
+        #expect(reparsed.vorbisComment?["ARTIST"] == ["drtagger"])
 
         // Audio frames must be byte-exact — that's the audiophile contract.
         let origAudio = try original.read(
@@ -58,7 +58,7 @@ struct WriteTests {
 
     @Test("PICTURE block is preserved byte-exact via reference load")
     func picturePreserved() throws {
-        guard let url = Bundle.module.url(forResource: "sample", withExtension: "flac") else {
+        guard let url = Bundle.module.url(forResource: "tone", withExtension: "flac") else {
             return
         }
         let source = try FileHandleDataSource(url: url)

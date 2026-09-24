@@ -12,7 +12,7 @@ struct StreamingTests {
 
     @Test("tag-only parse stays under 16KB for typical files")
     func tagParseIsSmall() throws {
-        guard let url = Bundle.module.url(forResource: "sample", withExtension: "flac") else {
+        guard let url = Bundle.module.url(forResource: "tone", withExtension: "flac") else {
             return
         }
         let inner = try FileHandleDataSource(url: url)
@@ -35,7 +35,7 @@ struct StreamingTests {
 
     @Test("loadPayload on reference block reads from source")
     func lazyPictureLoad() throws {
-        guard let url = Bundle.module.url(forResource: "sample", withExtension: "flac") else {
+        guard let url = Bundle.module.url(forResource: "tone", withExtension: "flac") else {
             return
         }
         let source = try FileHandleDataSource(url: url)
