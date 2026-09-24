@@ -167,7 +167,8 @@ extension ContentView {
 // Left column: every album in the store, newest first.
 struct QueueSidebar: View {
     @Environment(LibraryController.self) private var library
-    @Query(sort: \AlbumRecord.addedAt, order: .reverse) private var albums: [AlbumRecord]
+    // Newest scan first; albums added by the same scan in title order.
+    @Query(sort: [SortDescriptor(\AlbumRecord.addedAt, order: .reverse), SortDescriptor(\AlbumRecord.displayTitle)]) private var albums: [AlbumRecord]
     @Binding var selection: PersistentIdentifier?
     @State private var search = ""
 

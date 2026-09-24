@@ -81,7 +81,16 @@ public struct DetectedAlbum: Sendable, Equatable, Codable, Hashable, Identifiabl
     }
 
     public var folderName: String {
-        kind == .sacdISO ? url.deletingPathExtension().lastPathComponent : url.lastPathComponent
+        if kind == .sacdISO { return url.deletingPathExtension().lastPathComponent }
+        // sacd_extract and similar tools write "Album/Stereo/…" and
+        // "Album/Multichannel/…": the album is the parent folder.
+        if Self.isAreaFolderName(url.lastPathComponent) { return url.deletingLastPathComponent().lastPathComponent }
+        return url.lastPathComponent
+    }
+
+    public static func isAreaFolderName(_ name: String) -> Bool {
+        let n = name.lowercased().trimmingCharacters(in: .whitespaces)
+        return ["stereo", "multichannel", "multi-channel", "multi channel", "mch", "2ch", "5ch", "6ch", "2.0", "5.1", "surround", "2ch stereo", "5.1ch"].contains(n)
     }
 
     // "Disc 2 of 3" evidence: the SACD master TOC's album set, else a disc

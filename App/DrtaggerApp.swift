@@ -12,6 +12,11 @@ struct DrtaggerApp: App {
     @State private var tagging = TagService()
 
     init() {
+        // Paths after `--add` are ours: without this AppKit also turns them
+        // into "open documents" events at launch, and a SwiftUI app launched
+        // to open documents skips its initial window. Finder's Open With and
+        // `open -a` still arrive through AppDelegate.application(_:open:).
+        UserDefaults.standard.register(defaults: ["NSTreatUnknownArgumentsAsOpen": "NO"])
         let container = Self.makeContainer()
         self.container = container
         let library = LibraryController(container: container)

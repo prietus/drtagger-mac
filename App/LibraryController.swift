@@ -137,6 +137,7 @@ final class LibraryController {
     }
 
     private func upsert(_ result: ScanResult) {
+        let scanTime = Date()      // one timestamp per scan so the queue orders it by title
         var added = 0
         var updated = 0
         for album in result.albums {
@@ -148,7 +149,7 @@ final class LibraryController {
                 }
                 updated += 1
             } else {
-                context.insert(AlbumRecord(detected: album, issues: issues))
+                context.insert(AlbumRecord(detected: album, issues: issues, addedAt: scanTime))
                 added += 1
             }
         }

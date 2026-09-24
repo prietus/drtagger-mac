@@ -53,7 +53,7 @@ final class AlbumRecord {
     var setTotal: Int?
     var setTitle: String?
 
-    init(detected: DetectedAlbum, issues: [ScanIssue] = []) {
+    init(detected: DetectedAlbum, issues: [ScanIssue] = [], addedAt: Date = Date()) {
         path = detected.id
         kindRaw = detected.kind.rawValue
         stateRaw = AlbumState.scanned.rawValue
@@ -63,8 +63,8 @@ final class AlbumRecord {
         formatsRaw = ""
         hasDST = false
         hasMultichannel = false
-        let now = Date()
-        addedAt = now
+        let now = addedAt
+        self.addedAt = now
         updatedAt = now
         apply(detected: detected, issues: issues)
     }

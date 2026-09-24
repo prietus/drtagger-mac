@@ -101,6 +101,19 @@ struct LibraryScannerTests {
         #expect(plan.numberedTracks.map(\.startSample) == [0, Int64(f1 * 588), Int64((f1 + f2) * 588)])
     }
 
+    @Test func areaSubfolderTakesTheParentName() throws {
+        let t = try TempTree()
+        defer { t.cleanup() }
+        try t.file("Beethoven_ Piano Sonatas Vol.9/Stereo/01 - I. Allegro.dsf", bytes: 10)
+        try t.file("Beethoven_ Piano Sonatas Vol.9/Stereo/02 - II. Andante.dsf", bytes: 10)
+        try t.file("Beethoven_ Piano Sonatas Vol.9/Beethoven_ Piano Sonatas Vol.9.xml")
+        let album = try #require(LibraryScanner().scan([t.root]).albums.first)
+        #expect(album.url.lastPathComponent == "Stereo")
+        #expect(album.folderName == "Beethoven_ Piano Sonatas Vol.9")
+        #expect(album.titleHint == "Beethoven Piano Sonatas Vol.9")
+        #expect(album.discPosition == nil, "a volume is not a disc")
+    }
+
     @Test func discTokensInNames() {
         #expect(FileRules.discNumber(fromFileName: "Led Zeppelin - Box Set (Disc 2).cue")?.number == 2)
         let n = FileRules.discNumber(fromFileName: "CANCIONEROS DEL SIGLO DE ORO  Colombina  1451-1595 (disc 1-3).iso")
