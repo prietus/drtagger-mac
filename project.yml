@@ -92,6 +92,13 @@ targets:
         LSApplicationCategoryType: public.app-category.music
         NSHumanReadableCopyright: "Copyright © 2026. All rights reserved."
         NSPrincipalClass: NSApplication
+        # Lets other apps (DrPlayer, Finder "Open With") hand album folders to
+        # drtagger. Alternate rank: never becomes the default for folders.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Folder
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Alternate
+            LSItemContentTypes: [public.folder]
         NSSupportsAutomaticTermination: false
         NSSupportsSuddenTermination: false
         # CUETools DB only speaks plain HTTP (no TLS on db.cuetools.net /

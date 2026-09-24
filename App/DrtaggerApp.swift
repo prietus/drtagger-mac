@@ -3,6 +3,7 @@ import SwiftUI
 
 @main
 struct DrtaggerApp: App {
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     private let container: ModelContainer
     @State private var settings = AppSettings()
     @State private var library: LibraryController
@@ -28,6 +29,15 @@ struct DrtaggerApp: App {
                 .environment(disc)
                 .environment(identify)
                 .environment(tagging)
+                // Folders opened from other apps reuse this window
+                // instead of spawning a new one.
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
+                .onAppear {
+                    appDelegate.openHandler = { urls in
+                        NSApp.activate()
+                        Task { await library.open(urls) }
+                    }
+                }
         }
         .modelContainer(container)
         .defaultSize(width: 1180, height: 760)

@@ -98,6 +98,18 @@ final class LibraryController {
         upsert(result)
     }
 
+    // Adds folders opened from another app and selects the album that was
+    // asked for, even if something else was selected before.
+    func open(_ urls: [URL]) async {
+        await addRoots(urls)
+        let paths = urls.map(\.standardizedFileURL.path)
+        if let record = allRecords().first(where: { record in
+            paths.contains { record.path == $0 || record.path.hasPrefix($0 + "/") }
+        }) {
+            selection = record.persistentModelID
+        }
+    }
+
     // Re-runs detection for one album. States that carry identification
     // progress (needsReview, confident, done…) survive the rescan; only
     // pending / scanning / error collapse to scanned.

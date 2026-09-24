@@ -353,7 +353,7 @@ artwork strip, chosen cover in Tags), decoded at screen size.
 
 ## 5. Sample files
 
-Source library: NFS mount `~/nfs` (read-only, NAS share):
+Source library: NFS mount `~/nfs` (read-only NAS share):
 `isos/` 205 SACD ISOs (71 DST, 48 with multichannel area, many with
 sacd_extract `.xml` sidecars), `rips/` 214 CD rips (193 CUEs, 123 of them
 single-image, several with HTOA), `dsf/` extracted DSF albums with ID3v2.4.

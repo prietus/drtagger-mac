@@ -1,8 +1,45 @@
 # drtagger for Mac
 
-Native macOS app that splits SACD ISOs and CD images (+CUE) into tracks,
-identifies the exact release and writes accurate, player-friendly metadata.
-Scope, decisions and delivery phases live in [DESIGN.md](DESIGN.md).
+A native macOS app for lossless music collections: it takes **SACD ISOs**,
+**CD images with CUE sheets** and **folders of tracks**, splits or extracts
+them into per-track files, **identifies the exact release** and writes
+accurate, Picard-compatible tags, cover art and ReplayGain, then files
+everything into your library.
+
+- **SACD**: reads Scarletbook ISOs directly, extracts the stereo (and
+  optionally multichannel) area to DSF, decodes DST losslessly, keeps the
+  disc text and catalog number.
+- **CD images**: sample-accurate CUE splitting to FLAC (WAV, FLAC, APE,
+  WavPack, TTA images), HTOA and pregap handling, verification against the
+  CUETools database, MusicBrainz disc IDs.
+- **Identification**: every signal available, combined and scored with an
+  explanation: barcodes and catalog numbers read from your scans (Vision),
+  existing tags, disc TOC, AcoustID fingerprints, folder names, SACD disc
+  text; MusicBrainz and Discogs candidates, hybrid-SACD layers, multi-disc
+  release sets, format plausibility.
+- **Tagging**: the Picard schema written to FLAC, DSF, WAV, AIFF, DSDIFF,
+  APE, WavPack, TTA and ALAC, with a per-field diff and locks before writing,
+  byte-exact backups and restore, and the audio payload hashed to prove it
+  was never touched.
+- **Extras**: EBU R128 loudness and ReplayGain 2 / R128 tags, cover art from
+  Cover Art Archive, fanart.tv, Discogs, iTunes and Deezer, path templates
+  with transliteration, Spanish and English UI.
+
+Requires macOS 15 or later. The design, decisions and delivery phases are
+in [DESIGN.md](DESIGN.md).
+
+## Status
+
+All planned phases are implemented and used daily by the author; releases
+with signed, notarized builds are coming. Until then, build from source.
+
+## API keys
+
+The app ships without keys. MusicBrainz, Cover Art Archive, iTunes Search,
+Deezer and CUETools DB need none. AcoustID (fingerprints), Discogs (credits
+and editions) and fanart.tv (covers) take a key you create with your own
+account, entered in Settings > Providers and stored in your Keychain, with a
+"Test" button next to each.
 
 ## Layout
 
@@ -10,7 +47,7 @@ Scope, decisions and delivery phases live in [DESIGN.md](DESIGN.md).
 |---|---|
 | `App/` | SwiftUI app target (macOS 15+, Swift 6) |
 | `Packages/FLACKit` | FLAC / DSF / WAV readers and writers, ID3v2, Vorbis comments |
-| `Packages/Chromaprint` | Vendored chromaprint 1.5.1 (LGPL) + `ChromaprintKit` Swift wrapper |
+| `Packages/Chromaprint` | Vendored chromaprint 1.5.1 (MIT) + `ChromaprintKit` Swift wrapper |
 | `Packages/ProviderKit` | MusicBrainz, AcoustID, Discogs clients and the `Candidate` model |
 | `Packages/LibraryKit` | Album discovery: folder scanner, CUE parser with encoding detection, SACD probe, disc TOC / IDs, split plan |
 | `Packages/SplitKit` | ffmpeg driver, verified CUE image splitting to FLAC, CUETools DB CRCs, path templates |
@@ -81,10 +118,11 @@ notarization accept them.
 
 ## Licenses
 
-- chromaprint: LGPL 2.1+ (source shipped unmodified in `Packages/Chromaprint`)
-- DSTKit: LGPL 2.1+, a Swift port of FFmpeg's `libavcodec/dstdec.c`
-- ffmpeg: LGPL 2.1+; the exact tarball, checksum and configure line are in
-  `Vendor/ffmpeg/BUILD-INFO.txt`
+drtagger for Mac is MIT licensed ([LICENSE](LICENSE)). Two components keep
+their own licenses, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md):
+DSTKit (LGPL 2.1+, a Swift port of FFmpeg's DST decoder) and the FFmpeg
+helpers built at release time (LGPL 2.1+, GPL-free configuration).
+Chromaprint is MIT.
 
 ## Release
 

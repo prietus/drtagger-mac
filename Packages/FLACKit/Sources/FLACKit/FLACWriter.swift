@@ -1,8 +1,6 @@
 import Foundation
 
-// Write strategy, ported from dr_mobile/DrMobile/Sources/Services/
-// FlacTagWriter.swift (lines 150-202) with the optimization we noted in the
-// reference memory: if the existing PADDING can absorb the new VORBIS_COMMENT
+// Write strategy, ported from dr mobile's FlacTagWriter with one optimization: if the existing PADDING can absorb the new VORBIS_COMMENT
 // without changing the total metadata section length, we rewrite only the
 // metadata prefix and skip copying the audio frames entirely. That matters
 // for huge files edited in place on a fast local disk.
