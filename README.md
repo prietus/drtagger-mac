@@ -126,12 +126,15 @@ Chromaprint is MIT.
 
 ## Release
 
-`scripts/release.sh` archives the app in Release with the Developer ID
-certificate, exports it, notarizes the zip with `notarytool` and staples the
-ticket. One-time setup:
+`scripts/release.sh <version>` builds Release, signs the app and the ffmpeg
+helpers with Developer ID (hardened runtime, secure timestamps), notarizes
+and staples, then tags `v<version>`, creates the GitHub release with the zip
+and bumps the cask in `prietus/homebrew-tap`. `NOTARIZE=0` only signs,
+`PUBLISH=0` stops after notarization. It expects a notarytool keychain
+profile (`NOTARY_PROFILE`, default `notarytool-profile`).
+
+Install a release with:
 
 ```
-xcrun notarytool store-credentials drtagger-notary --apple-id <apple id> --team-id LFTD9T269J
+brew install --cask prietus/tap/drtagger
 ```
-
-`SKIP_NOTARIZE=1 scripts/release.sh` only archives and verifies the signature.

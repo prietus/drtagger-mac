@@ -322,8 +322,8 @@ Responses cached on disk keyed by URL with provider-specific TTLs.
    editable in Settings with a live preview and ASCII-only names, files
    organised into the library after Apply, originals moved to the Trash
    after a verified split/extract (setting), Spanish localisation of every
-   string, `scripts/release.sh` (Developer ID archive, export, notarytool,
-   staple; needs a `drtagger-notary` keychain profile) with secure
+   string, `scripts/release.sh <version>` (Developer ID build, notarytool,
+   staple, tag, GitHub release and Homebrew cask bump) with secure
    timestamps on the app and the ffmpeg helpers.
 
 7. Multi-disc release sets. **Done 2026-09-22.** Several images with
