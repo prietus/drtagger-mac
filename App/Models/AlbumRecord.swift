@@ -108,7 +108,11 @@ final class AlbumRecord {
         formatsRaw.split(separator: ",").compactMap { AudioFormat(rawValue: String($0)) }
     }
 
-    var isSplittable: Bool { kind == .cueImage || kind == .cueMultiFile }
+    // Has a CUE, so a disc TOC and a CUETools DB check make sense.
+    var hasCueSheet: Bool { kind == .cueImage || kind == .cueMultiFile }
+    // One image file per disc: splitting produces the tracks. Albums that
+    // already are one file per track have nothing to split.
+    var isSplittable: Bool { kind == .cueImage }
 
     var toc: DiscTOC? {
         get { tocData.flatMap { try? JSONDecoder().decode(DiscTOC.self, from: $0) } }

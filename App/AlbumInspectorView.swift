@@ -24,7 +24,7 @@ struct AlbumInspectorView: View {
                     if let sacd = detected.sacd {
                         SACDExtractView(record: record, sacd: sacd)
                     }
-                    if record.isSplittable {
+                    if record.hasCueSheet {
                         DiscIdentityView(record: record)
                     }
                     TagPreviewView(record: record)

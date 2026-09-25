@@ -16,8 +16,10 @@ struct DiscIdentityView: View {
                 identityRows
                 Divider()
                 ctdbRows
-                Divider()
-                splitRows
+                if record.isSplittable {
+                    Divider()
+                    splitRows
+                }
                 if let activity = disc.activity(for: record) {
                     HStack(spacing: 8) {
                         if let f = activity.fraction {
