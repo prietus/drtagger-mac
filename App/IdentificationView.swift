@@ -88,10 +88,13 @@ struct IdentificationView: View {
             if members.count > 1 {
                 Text("Release set · \(members.count) discs").font(.caption).foregroundStyle(.secondary)
             }
-            Button(record.identification == nil ? "Identify" : "Identify Again") {
-                Task { await identify.identify(record, members: members, settings: settings) }
+            // The first identification starts from the step bar above.
+            if record.identification != nil {
+                Button("Identify Again") {
+                    Task { await identify.identify(record, members: members, settings: settings) }
+                }
+                .disabled(identify.isBusy(record))
             }
-            .disabled(identify.isBusy(record))
         }
         .font(.callout)
     }

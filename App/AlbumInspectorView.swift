@@ -10,28 +10,40 @@ struct AlbumInspectorView: View {
 
     private var detected: DetectedAlbum? { record.detected }
     @State private var viewing: ImageViewerItem?
+    // Source, disc and track information: reference, not steps.
+    @AppStorage("inspector.showDetails") private var showDetails = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 if let detected {
-                    overview(detected)
+                    WorkflowView(record: record)
                     ReleaseSetView(record: record)
                     IdentificationView(record: record)
-                    TagPreviewView(record: record)
+                    if let sacd = detected.sacd {
+                        SACDExtractView(record: record, sacd: sacd)
+                    }
                     if record.isSplittable {
                         DiscIdentityView(record: record)
                     }
-                    if let sacd = detected.sacd {
-                        sacdSection(sacd)
-                        SACDExtractView(record: record, sacd: sacd)
-                    }
-                    ForEach(detected.discs, id: \.number) { disc in
-                        discSection(disc, showNumber: detected.discs.count > 1)
-                    }
-                    if !detected.artworkFiles.isEmpty {
-                        artworkSection(detected.artworkFiles)
+                    TagPreviewView(record: record)
+                    DisclosureGroup(isExpanded: $showDetails) {
+                        VStack(alignment: .leading, spacing: 20) {
+                            overview(detected)
+                            if let sacd = detected.sacd {
+                                sacdSection(sacd)
+                            }
+                            ForEach(detected.discs, id: \.number) { disc in
+                                discSection(disc, showNumber: detected.discs.count > 1)
+                            }
+                            if !detected.artworkFiles.isEmpty {
+                                artworkSection(detected.artworkFiles)
+                            }
+                        }
+                        .padding(.top, 10)
+                    } label: {
+                        Text("Details").font(.headline)
                     }
                 } else {
                     Text("No scan details stored for this album. Use Rescan.")
