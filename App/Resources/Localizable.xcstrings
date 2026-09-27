@@ -1502,6 +1502,16 @@
         }
       }
     },
+    "Extract & Identify": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extraer e identificar"
+          }
+        }
+      }
+    },
     "Extract & Identify Again": {
       "localizations": {
         "es": {
@@ -1556,12 +1566,32 @@
         }
       }
     },
+    "Extract the DSF tracks, then identify the release with their acoustic fingerprints": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extrae las pistas DSF y luego identifica la release con sus huellas acústicas"
+          }
+        }
+      }
+    },
     "Extract the SACD first; the DSF tracks receive the tags.": {
       "localizations": {
         "es": {
           "stringUnit": {
             "state": "translated",
             "value": "Extrae primero el SACD; los tags se escriben en las pistas DSF."
+          }
+        }
+      }
+    },
+    "Extract the disc first: its fingerprints identify the exact edition.": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Extrae primero el disco: sus huellas identifican la edición exacta."
           }
         }
       }

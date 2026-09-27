@@ -20,10 +20,11 @@ struct AlbumInspectorView: View {
                 if let detected {
                     WorkflowView(record: record)
                     ReleaseSetView(record: record)
-                    IdentificationView(record: record)
+                    // SACD images are extracted before they are identified.
                     if let sacd = detected.sacd {
                         SACDExtractView(record: record, sacd: sacd)
                     }
+                    IdentificationView(record: record)
                     if record.hasCueSheet {
                         DiscIdentityView(record: record)
                     }

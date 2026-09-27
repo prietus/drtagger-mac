@@ -52,11 +52,13 @@ enum Workflow {
         let pending = members.filter(needsFiles)
         guard !pending.isEmpty else { return true }
         guard let root = destination(settings, message: String(localized: "Choose the library folder where the tracks are written.")) else { return false }
+        // Files left by an earlier session (the queue starts empty) are
+        // replaced: the output is identical and verified again.
         for m in pending {
             if m.kind == .sacdISO {
-                await disc.extractSACD(m, into: root, multichannel: settings.extractMultichannel, options: extractOptions(settings, overwrite: false), trashOriginals: settings.moveOriginalsToTrash)
+                await disc.extractSACD(m, into: root, multichannel: settings.extractMultichannel, options: extractOptions(settings, overwrite: true), trashOriginals: settings.moveOriginalsToTrash)
             } else {
-                await disc.split(m, into: root, locator: settings.ffmpegLocator, options: splitOptions(settings, overwrite: false), trashOriginals: settings.moveOriginalsToTrash)
+                await disc.split(m, into: root, locator: settings.ffmpegLocator, options: splitOptions(settings, overwrite: true), trashOriginals: settings.moveOriginalsToTrash)
             }
             if m.state == .error || needsFiles(m) { return false }
         }
@@ -96,7 +98,21 @@ struct WorkflowView: View {
         }
     }
 
+    // SACD images are extracted first: without the DSFs there are no
+    // fingerprints, and extraction does not depend on the release (the
+    // organizer renames and moves the files when tags are applied).
+    private var extractFirst: Bool { record.kind == .sacdISO }
+    private var hasFingerprints: Bool { (record.identification?.fingerprints?.fingerprintedTracks ?? 0) > 0 }
+
     private var steps: [(String, StepState)] {
+        if extractFirst {
+            let e: StepState = !filesNeeded ? .done : .current
+            let i: StepState = identified ? .done : (!filesNeeded ? .current : .pending)
+            let r: StepState = chosen ? .done : (identified ? .current : .pending)
+            let t: StepState = (plan != nil || applied) ? .done : (chosen && !filesNeeded ? .current : .pending)
+            let a: StepState = applied ? .done : (plan != nil ? .current : .pending)
+            return [(filesLabel, e), (String(localized: "Identify"), i), (String(localized: "Release"), r), (String(localized: "Tags"), t), (String(localized: "Apply"), a)]
+        }
         let s1: StepState = identified ? .done : .current
         let s2: StepState = chosen ? .done : (identified ? .current : .pending)
         let s3: StepState = !filesNeeded ? .done : (chosen ? .current : .pending)
@@ -119,20 +135,6 @@ struct WorkflowView: View {
             HStack(alignment: .center, spacing: 12) {
                 status
                 Spacer(minLength: 8)
-                // A SACD image cannot be fingerprinted until it is extracted:
-                // when the first pass is not sure, extract and try again.
-                if !busy, identified, !isConfident, !applied, record.kind == .sacdISO, filesNeeded {
-                    Button("Extract & Identify Again") {
-                        Task {
-                            running = true
-                            defer { running = false }
-                            if await Workflow.produceFiles(members, disc: disc, settings: settings) {
-                                await identify.identify(record, members: members, settings: settings)
-                            }
-                        }
-                    }
-                    .help("Acoustic fingerprints need the extracted DSF files")
-                }
                 // Extracted after identifying: fingerprints can now help.
                 if !busy, identified, !isConfident, !applied, record.kind == .sacdISO, !filesNeeded,
                    (record.identification?.fingerprints?.fingerprintedTracks ?? 0) == 0 {
@@ -182,7 +184,9 @@ struct WorkflowView: View {
 
     @ViewBuilder
     private var status: some View {
-        if !identified {
+        if extractFirst, filesNeeded, !chosen {
+            Text("Extract the disc first: its fingerprints identify the exact edition.").foregroundStyle(.secondary)
+        } else if !identified {
             Text("Find the exact release from tags, disc data, scans and fingerprints.").foregroundStyle(.secondary)
         } else if !chosen {
             Label("Choose a release in Identification below.", systemImage: "hand.point.down").foregroundStyle(.orange)
@@ -196,7 +200,11 @@ struct WorkflowView: View {
 
     @ViewBuilder
     private var primaryButton: some View {
-        if !identified {
+        if extractFirst, filesNeeded, !(chosen && hasFingerprints) && !(chosen && isConfident) {
+            Button("Extract & Identify") { Task { await extractAndIdentify() } }
+                .buttonStyle(.borderedProminent).disabled(busy)
+                .help("Extract the DSF tracks, then identify the release with their acoustic fingerprints")
+        } else if !identified {
             Button(identify.isBusy(record) ? "Identifying…" : "Identify") {
                 Task { await identify.identify(record, members: members, settings: settings) }
             }
@@ -229,6 +237,18 @@ struct WorkflowView: View {
         } else {
             Button("Preview Tags") { Task { await tagging.buildPlan(record, members: members, settings: settings) } }
                 .buttonStyle(.borderedProminent).disabled(busy)
+        }
+    }
+
+    // SACD: extract, identify with fingerprints, and preview the tags when
+    // the match is sure.
+    private func extractAndIdentify() async {
+        running = true
+        defer { running = false }
+        guard await Workflow.produceFiles(members, disc: disc, settings: settings) else { return }
+        await identify.identify(record, members: members, settings: settings)
+        if TagService.chosenCandidate(record) != nil {
+            await tagging.buildPlan(record, members: members, settings: settings)
         }
     }
 
