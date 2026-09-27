@@ -66,6 +66,7 @@ final class TagService {
     private(set) var errors: [String: String] = [:]
     private(set) var plans: [String: TagPlan] = [:]
     private var leaders: [String: String] = [:]     // member path → plan key (the set's first record)
+    private var detailCache: [String: Candidate] = [:] // candidate id → release with its tracklist
 
     private func key(_ record: AlbumRecord) -> String { leaders[record.path] ?? record.path }
     func isBusy(_ record: AlbumRecord) -> Bool { activity[key(record)] != nil }
@@ -119,7 +120,7 @@ final class TagService {
         guard !isBusy(record) else { return }
         let path = leader.path
         errors[path] = nil
-        guard let candidate = Self.chosenCandidate(leader) else {
+        guard var candidate = Self.chosenCandidate(leader) else {
             errors[path] = String(localized: "Choose a release in Identification first.")
             return
         }
@@ -128,6 +129,32 @@ final class TagService {
         guard !targets.isEmpty else { errors[path] = String(localized: "No audio files to tag."); return }
         activity[path] = Activity(message: String(localized: "Reading tags…"), fraction: nil)
         defer { activity[path] = nil }
+
+        // Candidates found by search carry no tracklist (details are only
+        // fetched for the best few): fetch it for the chosen one.
+        if candidate.allTracks.isEmpty {
+            if let cached = detailCache[candidate.id] {
+                candidate = cached
+            } else {
+                activity[path] = Activity(message: String(localized: "Fetching release details…"), fraction: nil)
+                let full: Candidate?
+                switch candidate.source {
+                case .musicbrainz: full = try? await MusicBrainzClient(userAgent: IdentifyService.userAgent).releaseDetail(id: candidate.providerID)
+                case .discogs:
+                    full = settings.isDiscogsConfigured
+                        ? try? await DiscogsClient(userAgent: IdentifyService.userAgent, token: settings.discogsToken.trimmed).releaseDetail(id: candidate.providerID)
+                        : nil
+                case .acoustid: full = nil
+                }
+                guard let full, !full.allTracks.isEmpty else {
+                    errors[path] = String(localized: "The tracklist of this release could not be downloaded; try again or choose another release.")
+                    return
+                }
+                detailCache[candidate.id] = full
+                candidate = full
+                activity[path] = Activity(message: String(localized: "Reading tags…"), fraction: nil)
+            }
+        }
 
         let identification = leader.identification
         let media = MatchScorer.relevantMedia(candidate, localFormat: identification?.signals.localFormat ?? .unknown)

@@ -133,6 +133,14 @@ struct WorkflowView: View {
                     }
                     .help("Acoustic fingerprints need the extracted DSF files")
                 }
+                // Extracted after identifying: fingerprints can now help.
+                if !busy, identified, !isConfident, !applied, record.kind == .sacdISO, !filesNeeded,
+                   (record.identification?.fingerprints?.fingerprintedTracks ?? 0) == 0 {
+                    Button("Identify Again with Fingerprints") {
+                        Task { await identify.identify(record, members: members, settings: settings) }
+                    }
+                    .help("The disc is extracted now, so acoustic fingerprints can confirm the edition")
+                }
                 if !busy, chosen, isConfident, !applied, plan == nil {
                     Button("Process All") { Task { await processAll() } }
                         .help("Extract or split, write tags, cover and ReplayGain, and file the album in the library")
