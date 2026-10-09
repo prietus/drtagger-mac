@@ -103,3 +103,14 @@ import Testing
         #expect(MusicBrainzClient.discogsIDs(fromURLRels: rels) == ["406222", "123"])
     }
 }
+
+
+@Suite struct DiscogsReleaseMappingTests {
+    @Test func barcodeCatalogsAndMedium() throws {
+        let json = #"{"id":27786006,"title":"The Power To Believe","year":2023,"country":"Japan","artists":[{"name":"King Crimson"}],"labels":[{"name":"Discipline Global Mobile","catno":"POCS-1950"},{"name":"Universal","catno":"none"}],"formats":[{"name":"CD","descriptions":["Album","Reissue"]}],"identifiers":[{"type":"Barcode","value":"4 988031 573259"},{"type":"Matrix / Runout","value":"POCS-1929 1T"}],"tracklist":[{"type_":"track","position":"1","title":"A Cappella","duration":"0:44"},{"type_":"heading","position":"","title":"Bonus Tracks:","duration":""},{"type_":"track","position":"2","title":"Superslow","duration":"3:38"}]}"#
+        let c = try DiscogsClient.decodeRelease(Data(json.utf8))
+        #expect(c.barcode == "4988031573259")
+        #expect(c.catalogNumber == "POCS-1950")
+        #expect(c.media.count == 1 && c.media[0].tracks.count == 2 && c.allTracks.map(\.durationMS) == [44000, 218000])
+    }
+}

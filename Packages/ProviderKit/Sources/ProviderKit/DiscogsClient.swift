@@ -92,9 +92,11 @@ public actor DiscogsClient {
     // can build a per-track diff.
     public func releaseDetail(id: String) async throws -> Candidate {
         let url = baseURL.appendingPathComponent("releases/\(id)")
-        let data = try await sendRateLimited(url: url)
-        let release = try JSONDecoder().decode(DiscogsRelease.self, from: data)
-        return Self.toCandidate(release: release)
+        return try Self.decodeRelease(try await sendRateLimited(url: url))
+    }
+
+    static func decodeRelease(_ data: Data) throws -> Candidate {
+        Self.toCandidate(release: try JSONDecoder().decode(DiscogsRelease.self, from: data))
     }
 
     // Every photo on a Discogs release page, primary first. Discogs does not
@@ -194,7 +196,13 @@ public actor DiscogsClient {
 
         let labelInfo = r.labels?.first
         let label = labelInfo?.name
-        let catNo = labelInfo?.catno
+        // Every label's catalog number, like MusicBrainz candidates carry them.
+        let catalogs = (r.labels ?? []).compactMap { $0.catno }.filter { !$0.isEmpty && $0.lowercased() != "none" }
+        let catNo = catalogs.isEmpty ? labelInfo?.catno : Array(NSOrderedSet(array: catalogs)).compactMap { $0 as? String }.joined(separator: ", ")
+        // The barcode, digits only ("4 988031 573259" → "4988031573259").
+        let barcode = (r.identifiers ?? []).filter { ($0.type ?? "").lowercased() == "barcode" }
+            .compactMap { $0.value?.filter(\.isNumber) }
+            .first { (8...14).contains($0.count) }
         let firstFormat = r.formats?.first
         let format = firstFormat?.name
         let formatDescriptions = firstFormat?.descriptions ?? []
@@ -249,7 +257,9 @@ public actor DiscogsClient {
             releasedDate: releasedDate,
             genres: r.genres ?? [],
             styles: r.styles ?? [],
-            formatDescriptions: formatDescriptions
+            formatDescriptions: formatDescriptions,
+            barcode: barcode,
+            media: tracks.isEmpty ? [] : [CandidateMedium(position: 1, format: format, tracks: tracks)]
         )
     }
 
@@ -330,6 +340,12 @@ private struct DiscogsRelease: Decodable {
     let formats: [DiscogsFormat]?
     let images: [DiscogsImage]?
     let tracklist: [DiscogsTrack]?
+    let identifiers: [DiscogsIdentifier]?
+}
+
+private struct DiscogsIdentifier: Decodable {
+    let type: String?
+    let value: String?
 }
 
 private struct DiscogsArtist: Decodable {

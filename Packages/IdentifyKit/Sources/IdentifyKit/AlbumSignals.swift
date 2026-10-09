@@ -61,6 +61,7 @@ public struct AlbumSignals: Sendable, Codable, Hashable {
     public var artistHint: String?
     public var albumHint: String?
     public var yearHint: String?
+    public var folderAlbumHint: String?                // title from the folder name, kept when tags/CUE override albumHint
     public var editionHint: String?                    // "20th Anniversary Edition"
     public var editionYearHint: String?                // year of the pressing / remaster
     public var countryHint: String?                    // ISO code, from folder name or tags
@@ -137,6 +138,7 @@ public struct SignalCollector: Sendable {
         let folder = FolderNameParser.parse(album.folderName)
         s.artistHint = folder.artist
         s.albumHint = folder.title
+        s.folderAlbumHint = folder.title
         s.yearHint = folder.year
         s.editionHint = folder.edition
         s.editionYearHint = folder.editionYear

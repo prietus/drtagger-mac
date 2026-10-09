@@ -106,15 +106,19 @@ public actor Identifier {
         var pool: [String: Candidate] = [:]
         var origins: [String: Set<CandidateOrigin>] = [:]
         var order: [String] = []
+        // MusicBrainz releases are keyed by MBID (fingerprint votes use it);
+        // Discogs releases by "discogs:<id>".
+        func key(_ c: Candidate) -> String { c.source == .musicbrainz ? c.providerID : c.id }
         func add(_ c: Candidate, _ origin: CandidateOrigin) {
-            guard c.source == .musicbrainz else { return }
-            if pool[c.providerID] == nil {
-                order.append(c.providerID)
-                pool[c.providerID] = c
-            } else if pool[c.providerID]!.allTracks.isEmpty && !c.allTracks.isEmpty {
-                pool[c.providerID] = c
+            guard c.source == .musicbrainz || c.source == .discogs else { return }
+            let k = key(c)
+            if pool[k] == nil {
+                order.append(k)
+                pool[k] = c
+            } else if pool[k]!.allTracks.isEmpty && !c.allTracks.isEmpty {
+                pool[k] = c
             }
-            origins[c.providerID, default: []].insert(origin)
+            origins[k, default: []].insert(origin)
         }
 
         // 1. MBIDs from tags / CUETools DB.
@@ -204,6 +208,14 @@ public actor Identifier {
                 let rs = try await musicBrainz.searchReleases(artist: signals.artistHint ?? "", album: title, limit: pool.count < 3 ? 15 : 8)
                 for r in rs { add(r, .textSearch) }
                 log("Text search \"\(title)\": \(rs.count) release(s).")
+                // Rippers sometimes leave the title of another edition (a box
+                // set's disc title) in the CUE and tags: try the folder's title.
+                if rs.isEmpty, let folderTitle = signals.folderAlbumHint, !folderTitle.isEmpty,
+                   MatchScorer.normalize(folderTitle) != MatchScorer.normalize(title) {
+                    let more = try await musicBrainz.searchReleases(artist: signals.artistHint ?? "", album: folderTitle, limit: 10)
+                    for r in more { add(r, .textSearch) }
+                    log("Text search \"\(folderTitle)\" (folder name): \(more.count) release(s).")
+                }
             } catch {
                 log("Text search failed: \(error.localizedDescription)")
             }
@@ -217,22 +229,34 @@ public actor Identifier {
             let s = MatchScorer.score(c, signals: signals, origins: Array(origins[id] ?? []), fingerprintVote: fingerprints?.votes.first { $0.releaseID == id }, fingerprintedTracks: fingerprints?.fingerprintedTracks ?? 0)
             return (id, s.score)
         }.sorted { $0.1 > $1.1 }
-        for (id, _) in provisional where pool[id]!.allTracks.isEmpty && detailFetches < config.maxDetailFetches {
+        for (id, _) in provisional where pool[id]!.source == .musicbrainz && pool[id]!.allTracks.isEmpty && detailFetches < config.maxDetailFetches {
             if let c = try? await musicBrainz.releaseDetail(id: id) {
                 pool[id] = c
                 detailFetches += 1
             }
         }
 
-        // 7. Discogs, for the credits merge and as extra editions.
+        // 7. Discogs: editions MusicBrainz lacks (many Japanese pressings).
+        // Barcode / catalog hits are fetched in full and scored like any
+        // other candidate; all hits also feed the credits merge.
         var discogsCandidates: [Candidate] = []
         if let discogs {
+            progress(IdentifyProgress(fraction: 0.88, message: "Searching Discogs"))
+            var hits: [(Candidate, CandidateOrigin)] = []
             for barcode in signals.uniqueBarcodes.prefix(2) {
-                if let rs = try? await discogs.searchByBarcode(barcode) { discogsCandidates.append(contentsOf: rs) }
+                if let rs = try? await discogs.searchByBarcode(barcode) { hits += rs.map { ($0, .barcode) } }
             }
-            if discogsCandidates.isEmpty, let catno = signals.uniqueCatalogNumbers.first {
-                if let rs = try? await discogs.searchByCatalog(catno) { discogsCandidates.append(contentsOf: rs) }
+            for catno in signals.uniqueCatalogNumbers.prefix(2) where hits.count < 6 {
+                if let rs = try? await discogs.searchByCatalog(catno) { hits += rs.map { ($0, .catalogNumber) } }
             }
+            var fetched = Set<String>()
+            for (hit, origin) in hits where fetched.count < 4 && fetched.insert(hit.providerID).inserted {
+                if let full = try? await discogs.releaseDetail(id: hit.providerID) {
+                    discogsCandidates.append(full)
+                    add(full, origin)
+                }
+            }
+            if !hits.isEmpty { log("Discogs: \(hits.count) hit(s) by barcode or catalog, \(fetched.count) fetched and scored.") }
         }
 
         // 8. Final scoring.
