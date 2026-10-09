@@ -92,3 +92,14 @@ import Testing
         #expect(decoded.artistCredits.isEmpty && decoded.tracks.first?.isrcs.isEmpty == true)
     }
 }
+
+
+@Suite struct ReleaseImageParsingTests {
+    @Test func discogsImagesAndMusicBrainzLinks() {
+        let discogs = Data(#"{"images":[{"type":"secondary","uri":"https://i.discogs.com/b.jpg","uri150":"https://i.discogs.com/b150.jpg","width":600,"height":600},{"type":"primary","uri":"https://i.discogs.com/a.jpg","width":1200,"height":1190}]}"#.utf8)
+        let images = DiscogsClient.parseImages(discogs)
+        #expect(images.map(\.url.lastPathComponent) == ["a.jpg", "b.jpg"] && images[0].isPrimary && images[1].thumbnail?.lastPathComponent == "b150.jpg")
+        let rels = Data(#"{"relations":[{"type":"amazon asin","url":{"resource":"https://www.amazon.com/x"}},{"type":"discogs","url":{"resource":"https://www.discogs.com/release/406222"}},{"type":"discogs","url":{"resource":"https://www.discogs.com/es/release/123-Some-Title"}}]}"#.utf8)
+        #expect(MusicBrainzClient.discogsIDs(fromURLRels: rels) == ["406222", "123"])
+    }
+}

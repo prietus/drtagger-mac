@@ -32,7 +32,7 @@ struct ImageViewerSheet: View {
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if let url = item.url {
+                if let url = item.url, url.isFileURL {
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
                 }
                 Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -61,7 +61,11 @@ struct ImageViewerSheet: View {
 
     private func load() async {
         let source: CGImageSource?
-        if let data = item.data {
+        var data = item.data
+        if data == nil, let url = item.url, !url.isFileURL {
+            data = try? await URLSession.shared.data(from: url).0
+        }
+        if let data {
             source = CGImageSourceCreateWithData(data as CFData, nil)
         } else if let url = item.url {
             source = CGImageSourceCreateWithURL(url as CFURL, nil)

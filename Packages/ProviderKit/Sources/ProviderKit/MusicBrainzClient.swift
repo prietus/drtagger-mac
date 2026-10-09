@@ -144,6 +144,24 @@ public actor MusicBrainzClient {
         return try Self.decodeRelease(data)
     }
 
+    // Discogs release ids linked from a MusicBrainz release (url relationships).
+    public func discogsReleaseIDs(mbid: String) async throws -> [String] {
+        var components = URLComponents(url: baseURL.appendingPathComponent("release/\(mbid)"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "fmt", value: "json"), URLQueryItem(name: "inc", value: "url-rels")]
+        guard let url = components.url else { throw ProviderError.invalidURL }
+        return Self.discogsIDs(fromURLRels: try await sendRateLimited(url: url))
+    }
+
+    static func discogsIDs(fromURLRels data: Data) -> [String] {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let rels = root["relations"] as? [[String: Any]] else { return [] }
+        return rels.compactMap { r -> String? in
+            guard (r["type"] as? String) == "discogs", let res = (r["url"] as? [String: Any])?["resource"] as? String,
+                  let m = res.firstMatch(of: #/discogs\.com/(?:[a-z-]+/)?release/(\d+)/#) else { return nil }
+            return String(m.1)
+        }
+    }
+
     // Exposed for tests: a release lookup JSON → Candidate.
     static func decodeRelease(_ data: Data) throws -> Candidate {
         let release = try JSONDecoder().decode(MBRelease.self, from: data)

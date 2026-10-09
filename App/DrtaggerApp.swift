@@ -11,6 +11,7 @@ struct DrtaggerApp: App {
     @State private var identify = IdentifyService()
     @State private var tagging = TagService()
     @State private var cddb = CDDBServer()
+    @State private var releaseImages = ReleaseImagesService()
 
     init() {
         // Paths after `--add` are ours: without this AppKit also turns them
@@ -36,6 +37,7 @@ struct DrtaggerApp: App {
                 .environment(identify)
                 .environment(tagging)
                 .environment(cddb)
+                .environment(releaseImages)
                 .task { cddb.update(enabled: settings.cddbServerEnabled, port: settings.cddbPort) }
                 .onChange(of: settings.cddbServerEnabled) { _, on in cddb.update(enabled: on, port: settings.cddbPort) }
                 .onChange(of: settings.cddbPort) { _, port in cddb.update(enabled: settings.cddbServerEnabled, port: port) }

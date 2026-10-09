@@ -10,6 +10,8 @@ struct IdentificationView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(LibraryController.self) private var library
     @State private var showLog = false
+    @State private var gallery: ScoredCandidate?
+    @State private var comparing = false
 
     private var members: [AlbumRecord] { library.members(of: record) }
     @State private var onlyPlausibleFormats: Bool? = nil   // nil: default for the album kind
@@ -20,6 +22,22 @@ struct IdentificationView: View {
     private var foldOtherFormats: Bool { onlyPlausibleFormats ?? (record.kind == .sacdISO) }
 
     var body: some View {
+        identificationBox
+            .sheet(item: $gallery) { scored in
+                ReleaseGallerySheet(scored: scored, isSelected: record.selectedCandidateID == scored.id) {
+                    identify.select(scored, for: record, members: members)
+                }
+            }
+            .sheet(isPresented: $comparing) {
+                if let result = record.identification {
+                    CompareCoversSheet(candidates: Array(result.candidates.prefix(12)), selectedID: record.selectedCandidateID) { scored in
+                        identify.select(scored, for: record, members: members)
+                    }
+                }
+            }
+    }
+
+    private var identificationBox: some View {
         GroupBox("Identification") {
             VStack(alignment: .leading, spacing: 10) {
                 header
@@ -88,6 +106,10 @@ struct IdentificationView: View {
             if members.count > 1 {
                 Text("Release set · \(members.count) discs").font(.caption).foregroundStyle(.secondary)
             }
+            if let result = record.identification, result.candidates.count > 1 {
+                Button("Compare Covers") { comparing = true }
+                    .help("See the candidates' covers and obis side by side and pick yours")
+            }
             // The first identification starts from the step bar above.
             if record.identification != nil {
                 Button("Identify Again") {
@@ -136,7 +158,7 @@ struct IdentificationView: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(shown.prefix(12)) { scored in
-                CandidateRow(scored: scored, selected: record.selectedCandidateID == scored.id) {
+                CandidateRow(scored: scored, selected: record.selectedCandidateID == scored.id, onImages: { gallery = scored }) {
                     identify.select(record.selectedCandidateID == scored.id ? nil : scored, for: record, members: members)
                 }
             }
@@ -149,7 +171,7 @@ struct IdentificationView: View {
                 DisclosureGroup("\(folded.count) in other formats", isExpanded: $showOtherFormats) {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(folded.prefix(12)) { scored in
-                            CandidateRow(scored: scored, selected: record.selectedCandidateID == scored.id) {
+                            CandidateRow(scored: scored, selected: record.selectedCandidateID == scored.id, onImages: { gallery = scored }) {
                                 identify.select(record.selectedCandidateID == scored.id ? nil : scored, for: record, members: members)
                             }
                         }
@@ -165,6 +187,7 @@ struct IdentificationView: View {
 struct CandidateRow: View {
     let scored: ScoredCandidate
     let selected: Bool
+    var onImages: (() -> Void)? = nil
     let onSelect: () -> Void
     @State private var expanded = false
 
@@ -178,6 +201,11 @@ struct CandidateRow: View {
                         .foregroundStyle(selected ? Color.accentColor : .secondary)
                 }
                 .buttonStyle(.borderless)
+                Button { onImages?() } label: {
+                    RemoteThumbnail(url: c.coverArtURL, side: 40)
+                }
+                .buttonStyle(.plain)
+                .help("See every photo of this release")
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text("\(c.artist) – \(c.title)").bold().lineLimit(1)

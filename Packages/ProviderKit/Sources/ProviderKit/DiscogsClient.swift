@@ -97,6 +97,30 @@ public actor DiscogsClient {
         return Self.toCandidate(release: release)
     }
 
+    // Every photo on a Discogs release page, primary first. Discogs does not
+    // say which one is the obi or the back: users upload them as they like.
+    public struct ReleaseImage: Sendable, Equatable, Hashable, Codable {
+        public let url: URL
+        public let thumbnail: URL?
+        public let isPrimary: Bool
+        public let width: Int?
+        public let height: Int?
+    }
+
+    public func images(releaseID id: String) async throws -> [ReleaseImage] {
+        let data = try await sendRateLimited(url: baseURL.appendingPathComponent("releases/\(id)"))
+        return Self.parseImages(data)
+    }
+
+    static func parseImages(_ data: Data) -> [ReleaseImage] {
+        let images = (try? JSONDecoder().decode(DiscogsImagesOnly.self, from: data))?.images ?? []
+        let mapped = images.compactMap { i -> ReleaseImage? in
+            guard let u = i.uri.flatMap(URL.init(string:)) else { return nil }
+            return ReleaseImage(url: u, thumbnail: i.uri150.flatMap(URL.init(string:)), isPrimary: i.type == "primary", width: i.width, height: i.height)
+        }
+        return mapped.filter(\.isPrimary) + mapped.filter { !$0.isPrimary }
+    }
+
     // MARK: Rate-limited HTTP
 
     private func sendRateLimited(url: URL) async throws -> Data {
@@ -325,6 +349,13 @@ private struct DiscogsFormat: Decodable {
 private struct DiscogsImage: Decodable {
     let type: String?
     let uri: String?
+    let uri150: String?
+    let width: Int?
+    let height: Int?
+}
+
+private struct DiscogsImagesOnly: Decodable {
+    let images: [DiscogsImage]?
 }
 
 private struct DiscogsTrack: Decodable {
