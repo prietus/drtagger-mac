@@ -33,6 +33,17 @@ in [DESIGN.md](DESIGN.md).
 All planned phases are implemented and used daily by the author; releases
 with signed, notarized builds are coming. Until then, build from source.
 
+## Use it from XLD
+
+drtagger can answer XLD's metadata lookups while you rip. Turn on
+Settings > Providers > "CDDB server for XLD", then in XLD set Preferences >
+CDDB: Server `localhost`, Port `8880`, Path `/~cddb/cddb.cgi`, Preferred
+Service FreeDB. drtagger looks the disc TOC up on MusicBrainz (fuzzy, so it
+also works when the disc ID is not registered) and lists the pressings that
+fit best first. CDDB only carries artist, album, year and track titles, so
+drag the finished rip into drtagger for the full tags, cover art and
+ReplayGain. The server listens on 127.0.0.1 only.
+
 ## API keys
 
 The app ships without keys. MusicBrainz, Cover Art Archive, iTunes Search,

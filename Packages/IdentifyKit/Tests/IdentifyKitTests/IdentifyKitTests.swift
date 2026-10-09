@@ -398,3 +398,62 @@ struct RealSampleTests {
         #expect(best.confidence >= .likely)
     }
 }
+
+@Suite("CDDB responder") struct CDDBResponderTests {
+    static func candidate(_ id: String, title: String, durations: [Int], year: String, artist: String = "坂本龍一") -> Candidate {
+        let tracks = durations.enumerated().map { CandidateTrack(position: $0.offset + 1, title: "Track \($0.offset + 1) 曲", durationMS: $0.element * 1000) }
+        return Candidate(source: .musicbrainz, providerID: id, title: title, artist: artist, year: year, country: "JP", label: "Midi",
+                         catalogNumber: "MDCL-1234", mediaFormat: "CD", trackCount: tracks.count, tracks: tracks, barcode: "4988000000000",
+                         media: [CandidateMedium(position: 1, format: "CD", tracks: tracks)])
+    }
+
+    @Test func queryListsRankedMatchesAndReadReturnsXmcd() async {
+        // Three tracks of 200, 180 and 240 s: offsets 150, 15150, 28650; length (150+46500)/75 = 622 s.
+        let good = Self.candidate("good", title: "音楽図鑑", durations: [200, 180, 240], year: "1984")
+        let poor = Self.candidate("poor", title: "音楽図鑑 (remaster)", durations: [205, 170, 250], year: "2015")
+        let wrongCount = Self.candidate("other", title: "Other", durations: [100, 100], year: "2000")
+        let responder = CDDBResponder { toc in
+            #expect(toc.trackOffsets == [150, 15150, 28650] && toc.leadOut == 622 * 75)
+            return [poor, wrongCount, good]
+        }
+        let q = await responder.respond(toQuery: "cmd=cddb+query+2a024903+3+150+15150+28650+622&hello=user+host+XLD+20250302&proto=6")
+        let lines = q.split(separator: "\n").map(String.init)
+        #expect(lines.first?.hasPrefix("211 ") == true, "\(q)")
+        #expect(lines[1] == "rock 2a024903 坂本龍一 / 音楽図鑑 [1984 · JP · CD · MDCL-1234]", "best fit first: \(lines[1])")
+        #expect(lines[2].hasPrefix("misc 2a024903 ") && lines.last == ".")
+        #expect(!q.contains("Other"), "a release with another track count is not listed")
+
+        let r = await responder.respond(toQuery: "cmd=cddb+read+rock+2a024903&hello=user+host+XLD+20250302&proto=6")
+        #expect(r.hasPrefix("210 rock 2a024903 "))
+        #expect(r.contains("DTITLE=坂本龍一 / 音楽図鑑\n") && r.contains("DYEAR=1984\n") && r.contains("TTITLE2=Track 3 曲\n"))
+        #expect(r.contains("#\t15150\n") && r.contains("# Disc length: 622 seconds"))
+        #expect(r.contains("MDCL-1234") && r.contains("MusicBrainz release good"))
+        #expect(r.hasSuffix("PLAYORDER=\n.\n"))
+
+        #expect(await responder.respond(toQuery: "cmd=cddb+read+jazz+2a024903").hasPrefix("401 "))
+        #expect(await responder.respond(toQuery: "cmd=proto+6").hasPrefix("201 "))
+        let none = CDDBResponder { _ in [] }
+        #expect(await none.respond(toQuery: "cmd=cddb+query+00000001+1+150+60").hasPrefix("202 "))
+        #expect(await none.respond(toQuery: "cmd=cddb+query+bad").hasPrefix("500 "))
+    }
+
+    @Test func singleMatchAnswers200AndLongFieldsSplit() async {
+        let one = Self.candidate("one", title: "A", durations: [200, 180, 240], year: "1984")
+        let responder = CDDBResponder { _ in [one] }
+        let q = await responder.respond(toQuery: "cmd=cddb+query+2a024903+3+150+15150+28650+622")
+        #expect(q == "200 rock 2a024903 坂本龍一 / A\n")
+        let long = CDDBResponder.field("TTITLE0", String(repeating: "あ", count: 120))
+        #expect(long.split(separator: "\n").count == 2 && long.split(separator: "\n").allSatisfy { $0.utf8.count <= 256 })
+    }
+
+    // Network: the Walkin' XRCD TOC through the real MusicBrainz fuzzy lookup.
+    @Test func liveFuzzyTOCLookup() async throws {
+        guard TestEnv.network, let album = TestEnv.album("cue-images/Miles Davis All Stars - Walkin' XRCD"), let cue = album.discs.first?.cue else { return }
+        let toc = try DiscTOC(cue: cue, fileFrames: [170557])
+        let q = "cmd=cddb+query+\(toc.freeDBDiscID)+\(toc.trackOffsets.count)+" + toc.trackOffsets.map(String.init).joined(separator: "+") + "+\(toc.leadOut / 75)&proto=6"
+        let answer = await CDDBResponder(userAgent: TestEnv.ua).respond(toQuery: q)
+        print(answer)
+        #expect(answer.hasPrefix("200 ") || answer.hasPrefix("211 "))
+        #expect(answer.lowercased().contains("walkin"))
+    }
+}

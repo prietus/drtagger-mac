@@ -351,6 +351,17 @@ request), a "Providers:" line under the identification signals saying what
 ran, and an image viewer sheet for any cover or scan (inspector header,
 artwork strip, chosen cover in Tags), decoded at screen size.
 
+CDDB server (2026-10-09): `CDDBResponder` (IdentifyKit) answers the
+CDDB-over-HTTP commands rippers send (`cddb query`, `cddb read`, `proto`,
+`hello`, `lscat`, `motd`, `stat`) from MusicBrainz's fuzzy TOC lookup (the
+query carries the disc length in whole seconds, so the exact disc ID
+cannot be computed), picks the matching medium of each release and ranks
+pressings with `MatchScorer`. Each listed match gets its own CDDB category
+so `cddb read` can tell them apart; the list line adds year, country,
+format and catalog number; EXTD carries label, catalog, barcode and MBID.
+`CDDBServer` (app) serves it with Network.framework on 127.0.0.1, off by
+default, port 8880.
+
 ## 5. Sample files
 
 Source library: NFS mount `~/nfs` (read-only NAS share):

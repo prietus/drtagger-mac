@@ -132,6 +132,15 @@ struct ProvidersSettingsView: View {
                 Link("Open your Discogs developer settings", destination: URL(string: "https://www.discogs.com/settings/developers")!)
                     .font(.caption)
             }
+            Section("CDDB server for XLD") {
+                Toggle("Answer CDDB requests from rippers on this Mac", isOn: $settings.cddbServerEnabled)
+                TextField("Port", value: $settings.cddbPort, format: .number.grouping(.never))
+                    .frame(maxWidth: 160)
+                CDDBServerStatus()
+                Text("In XLD: Preferences > CDDB, Server localhost, Port \(String(settings.cddbPort)), Path /~cddb/cddb.cgi, Preferred Service FreeDB. drtagger must be open while you rip. Answers come from MusicBrainz by disc TOC, best-fitting pressing first; CDDB carries artist, album, year and track titles only, so tag the rip in drtagger afterwards for full metadata.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("fanart.tv (high-resolution artwork)") {
                 SecureField("Project API key", text: $settings.fanartKey)
                 KeyTestRow(enabled: settings.isFanartConfigured) {
@@ -291,6 +300,24 @@ struct KeyTestRow: View {
                 }
             } else if !enabled {
                 Text("Enter a key to test it").foregroundStyle(.tertiary)
+            }
+        }
+        .font(.callout)
+    }
+}
+
+struct CDDBServerStatus: View {
+    @Environment(CDDBServer.self) private var server
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if server.isRunning {
+                Label("Listening on 127.0.0.1:\(String(server.port)) · \(server.requestCount) request(s)", systemImage: "dot.radiowaves.left.and.right")
+                    .foregroundStyle(.green)
+            } else if let error = server.lastError {
+                Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+            } else {
+                Text("Off").foregroundStyle(.tertiary)
             }
         }
         .font(.callout)

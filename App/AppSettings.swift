@@ -33,6 +33,8 @@ final class AppSettings {
         static let asciiFileNames = "library.asciiFileNames"
         static let organizeAfterApply = "library.organizeAfterApply"
         static let computeReplayGain = "tags.replayGain"
+        static let cddbServer = "cddb.serverEnabled"
+        static let cddbPort = "cddb.port"
     }
 
     // Destination library root for split tracks. Empty = not configured.
@@ -96,6 +98,13 @@ final class AppSettings {
     var computeReplayGain: Bool {
         didSet { defaults.set(computeReplayGain, forKey: Key.computeReplayGain) }
     }
+    // Local CDDB server for XLD and other rippers.
+    var cddbServerEnabled: Bool {
+        didSet { defaults.set(cddbServerEnabled, forKey: Key.cddbServer) }
+    }
+    var cddbPort: Int {
+        didSet { defaults.set(cddbPort, forKey: Key.cddbPort) }
+    }
 
     var acoustIDKey: String {
         didSet { Self.store(acoustIDKey, account: KeychainAccount.acoustIDKey) }
@@ -129,6 +138,9 @@ final class AppSettings {
         asciiFileNames = defaults.object(forKey: Key.asciiFileNames) as? Bool ?? true
         organizeAfterApply = defaults.object(forKey: Key.organizeAfterApply) as? Bool ?? true
         computeReplayGain = defaults.object(forKey: Key.computeReplayGain) as? Bool ?? true
+        cddbServerEnabled = defaults.bool(forKey: Key.cddbServer)
+        let port = defaults.integer(forKey: Key.cddbPort)
+        cddbPort = (1024...65535).contains(port) ? port : 8880
         acoustIDKey = Keychain.get(KeychainAccount.acoustIDKey) ?? ""
         discogsToken = Keychain.get(KeychainAccount.discogsToken) ?? ""
         fanartKey = Keychain.get(KeychainAccount.fanartKey) ?? ""

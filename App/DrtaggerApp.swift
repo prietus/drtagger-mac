@@ -10,6 +10,7 @@ struct DrtaggerApp: App {
     @State private var disc = DiscService()
     @State private var identify = IdentifyService()
     @State private var tagging = TagService()
+    @State private var cddb = CDDBServer()
 
     init() {
         // Paths after `--add` are ours: without this AppKit also turns them
@@ -34,6 +35,10 @@ struct DrtaggerApp: App {
                 .environment(disc)
                 .environment(identify)
                 .environment(tagging)
+                .environment(cddb)
+                .task { cddb.update(enabled: settings.cddbServerEnabled, port: settings.cddbPort) }
+                .onChange(of: settings.cddbServerEnabled) { _, on in cddb.update(enabled: on, port: settings.cddbPort) }
+                .onChange(of: settings.cddbPort) { _, port in cddb.update(enabled: settings.cddbServerEnabled, port: port) }
                 // Folders opened from other apps reuse this window
                 // instead of spawning a new one.
                 .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
@@ -63,6 +68,7 @@ struct DrtaggerApp: App {
         Settings {
             SettingsView()
                 .environment(settings)
+                .environment(cddb)
         }
     }
 
