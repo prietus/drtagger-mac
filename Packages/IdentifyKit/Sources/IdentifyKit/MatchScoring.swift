@@ -136,6 +136,11 @@ public enum MatchScorer {
                 let counts = paired.map(\.trackCount)
                 return counts.allSatisfy { $0 != nil } && !counts.isEmpty ? counts.compactMap { $0 }.reduce(0, +) : nil
             }
+            // Search results: per-medium counts without the video media.
+            let counts = media.map(\.trackCount)
+            if media.count < candidate.media.count, !counts.isEmpty, counts.allSatisfy({ $0 != nil }) {
+                return counts.compactMap { $0 }.reduce(0, +)
+            }
             return candidate.trackCount
         }()
         var trackCountMatches: Bool? = nil
@@ -325,7 +330,8 @@ public enum MatchScorer {
     // Hybrid SACDs (and CD+DVD sets) list one medium per layer; pick the
     // layer matching the local files, otherwise keep every medium.
     public static func relevantMedia(_ candidate: Candidate, localFormat: AlbumSignals.LocalFormat) -> [CandidateMedium] {
-        let media = candidate.media
+        // The DVD of a CD+DVD edition has no counterpart among audio files.
+        let media = candidate.media.contains { !$0.isVideo } ? candidate.media.filter { !$0.isVideo } : candidate.media
         let layers = media.filter { ($0.format ?? "").lowercased().contains("layer") }
         guard !layers.isEmpty else { return media }
         let wanted: (String) -> Bool

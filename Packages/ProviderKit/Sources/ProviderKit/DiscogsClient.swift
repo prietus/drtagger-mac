@@ -223,8 +223,13 @@ public actor DiscogsClient {
             .first(where: { Self.isRealCoverURL($0) })
             .flatMap(URL.init(string:))
 
+        // CD+DVD editions: the DVD's tracks ("DVD-1"…) are video, unless it is a DVD-Audio.
+        let formats = r.formats ?? []
+        let videoDVD = formats.count > 1 && formats.contains { $0.name == "DVD" && !($0.descriptions ?? []).contains("DVD-Audio") }
+            && formats.contains { $0.name != "DVD" }
         let tracks: [CandidateTrack] = (r.tracklist ?? [])
             .filter { ($0.type_ ?? "track") == "track" }
+            .filter { !videoDVD || !($0.position ?? "").uppercased().hasPrefix("DVD") }
             .enumerated()
             .map { idx, t in
                 let credits: [TrackCredit] = (t.extraartists ?? []).compactMap {

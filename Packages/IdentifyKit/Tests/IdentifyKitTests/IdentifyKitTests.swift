@@ -283,6 +283,20 @@ struct MatchScorerTests {
         #expect(d2 < 0.3)
     }
 
+    @Test func videoDiscOfACDPlusDVDEditionIsIgnored() {
+        // Muse, Black Holes and Revelations WPZR-30194: CD (12) + DVD-Video (6).
+        let tracks = (1...12).map { CandidateTrack(position: $0, title: "T\($0)", artist: nil, durationMS: 200_000) }
+        let c = Candidate(source: .musicbrainz, providerID: "wpzr", title: "Black Holes and Revelations", artist: "Muse",
+                          catalogNumber: "WPZR-30194", trackCount: 18, barcode: "4943674070084",
+                          media: [CandidateMedium(position: 1, format: "CD", tracks: tracks),
+                                  CandidateMedium(position: 2, format: "DVD-Video", trackCount: 6)])
+        var s = AlbumSignals()
+        s.tracks = (0..<12).map { LocalTrack(index: $0, discNumber: 1, title: nil, durationSeconds: 200, url: nil) }
+        let scored = MatchScorer.score(c, signals: s, origins: [.barcode], fingerprintVote: nil, fingerprintedTracks: 0)
+        #expect(scored.trackCountMatches == true)
+        #expect(c.plausibleTrackCounts.contains(12))
+    }
+
     @Test func printedWordsAreNotCatalogs() {
         let found = CatalogNumberParser.extract(from: ["EUROPE-2006", "MADE IN JAPAN 2006", "WPZR-30194"]).map(\.formatted)
         #expect(found == ["WPZR-30194"])

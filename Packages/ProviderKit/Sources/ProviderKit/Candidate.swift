@@ -186,6 +186,8 @@ public struct Candidate: Sendable, Identifiable, Equatable, Codable, Hashable {
     public var plausibleTrackCounts: Set<Int> {
         var set = Set<Int>()
         if let t = trackCount { set.insert(t) }
+        let video = media.filter(\.isVideo).compactMap(\.trackCount).reduce(0, +)
+        if video > 0, let t = trackCount, t > video { set.insert(t - video) }
         let layers = media.filter(\.isLayer)
         if !layers.isEmpty {
             for m in layers { if let c = m.trackCount { set.insert(c) } }
@@ -222,6 +224,11 @@ public struct CandidateMedium: Sendable, Equatable, Codable, Hashable {
     }
 
     public var isLayer: Bool { (format ?? "").lowercased().contains("layer") }
+
+    // Picture media (the DVD of a CD+DVD edition): never among audio files.
+    public var isVideo: Bool {
+        ["dvd-video", "vhs", "laserdisc", "vcd", "svcd", "hd-dvd", "betamax", "umd"].contains((format ?? "").lowercased())
+    }
 }
 
 public struct CandidateTrack: Sendable, Equatable, Codable, Hashable {
