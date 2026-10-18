@@ -165,6 +165,9 @@ public enum CatalogNumberParser {
         "ISBN", "EAN", "UPC", "JAN", "TEL", "FAX", "BOX", "SUITE", "NEW", "YORK", "LONDON", "TOKYO", "PARIS",
         "JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
         "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE",
+        // Printed on sleeves next to years: "EUROPE 2006", "MADE IN JAPAN".
+        "EUROPE", "JAPAN", "GERMANY", "HOLLAND", "FRANCE", "ITALY", "SPAIN", "ENGLAND", "USA", "UK", "EU", "MADE", "PRINTED",
+        "MANUFACTURED", "DISTRIBUTED", "RECORDED", "MIXED", "MASTERED", "COPYRIGHT", "LIVE", "TOUR", "STUDIO", "RECORDS", "MUSIC",
     ]
 
     public static func extract(from lines: [String]) -> [CatalogNumber] {

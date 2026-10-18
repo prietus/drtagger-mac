@@ -269,6 +269,26 @@ struct MatchScorerTests {
         #expect(MatchScorer.score(box, signals: whole, origins: [.textSearch], fingerprintVote: nil, fingerprintedTracks: 0).trackCountMatches == true)
     }
 
+    @Test func printedWordsAreNotCatalogs() {
+        let found = CatalogNumberParser.extract(from: ["EUROPE-2006", "MADE IN JAPAN 2006", "WPZR-30194"]).map(\.formatted)
+        #expect(found == ["WPZR-30194"])
+    }
+
+    @Test func scansContradictingTheTaggedEdition() {
+        // Muse, Black Holes and Revelations: files tagged with WPCR-12306,
+        // scans and folder say WPZR-30194 (the CD+DVD edition).
+        let tagged = Candidate(source: .musicbrainz, providerID: "wpcr", title: "Black Holes and Revelations", artist: "Muse",
+                               catalogNumber: "WPCR-12306", barcode: "4943674064373")
+        var s = AlbumSignals()
+        s.barcodes = [SignalValue("4943674070084", origin: .artwork)]
+        s.catalogNumbers = [SignalValue("WPZR-30194", origin: .folderName)]
+        #expect(MatchScorer.contradictsLocalCodes(tagged, signals: s))
+        let right = Candidate(source: .musicbrainz, providerID: "wpzr", title: "Black Holes and Revelations", artist: "Muse",
+                              catalogNumber: "WPZR-30194~5", barcode: "4943674070084")
+        #expect(!MatchScorer.contradictsLocalCodes(right, signals: s))
+        #expect(!MatchScorer.contradictsLocalCodes(tagged, signals: AlbumSignals()), "no codes: nothing to contradict")
+    }
+
     @Test func numericCatalogIsABarcode() {
         var s = AlbumSignals()
         s.catalogNumbers = [SignalValue("4988006888883", origin: .sacdText), SignalValue("TOGE-12061", origin: .sacdText)]

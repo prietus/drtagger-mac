@@ -223,7 +223,8 @@ final class BatchRunner {
         } else if let result = r.identification, result.isConfident, TagService.chosenCandidate(r) != nil {
             set(members, .readyToFinish, note: nil)
         } else if let result = r.identification, let best = result.best, best.origins.contains(.tagMBID),
-                  best.trackCountMatches == true, (best.durationFit ?? 1) >= 0.8 {
+                  best.trackCountMatches == true, (best.durationFit ?? 1) >= 0.8,
+                  !MatchScorer.contradictsLocalCodes(best.candidate, signals: result.signals) {
             // The release the files already name, and it fits: confirmed.
             identify.select(best, for: r, members: members)
             set(members, .readyToFinish, note: nil)

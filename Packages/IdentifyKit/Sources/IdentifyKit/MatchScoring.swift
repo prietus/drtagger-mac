@@ -300,6 +300,19 @@ public enum MatchScorer {
         }
     }
 
+    // True when the album carries barcodes or catalog numbers (scans, folder
+    // name, tags, CUE) and none of them belongs to `candidate`: the files may
+    // name one edition while the disc in hand is another.
+    public static func contradictsLocalCodes(_ candidate: Candidate, signals: AlbumSignals) -> Bool {
+        let barcodes = signals.uniqueBarcodes
+        let catalogs = signals.uniqueCatalogNumbers.map(CatalogNumberParser.normalize).filter { $0.count >= 4 }
+        guard !barcodes.isEmpty || !catalogs.isEmpty else { return false }
+        if let b = candidate.barcode, barcodes.contains(where: { barcodesEqual($0, b) }) { return false }
+        let mine = candidate.catalogNumbers.map(CatalogNumberParser.normalize)
+        if catalogs.contains(where: { local in mine.contains { $0 == local || (local.count >= 6 && ($0.hasSuffix(local) || local.hasSuffix($0))) } }) { return false }
+        return true
+    }
+
     // Media at the local disc positions, in local order. A plain album
     // covers every medium; a set member covers medium N only.
     public static func pairedMedia(_ media: [CandidateMedium], signals: AlbumSignals) -> [CandidateMedium] {

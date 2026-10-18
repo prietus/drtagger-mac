@@ -137,7 +137,10 @@ public actor Identifier {
         let taggedFit = order.contains { id in
             guard origins[id]?.contains(.tagMBID) == true, let c = pool[id] else { return false }
             let s = MatchScorer.score(c, signals: signals, origins: [.tagMBID], fingerprintVote: nil, fingerprintedTracks: 0)
-            return s.trackCountMatches == true && (s.durationFit ?? 1) >= 0.8
+            return s.trackCountMatches == true && (s.durationFit ?? 1) >= 0.8 && !MatchScorer.contradictsLocalCodes(c, signals: signals)
+        }
+        if !taggedFit, order.contains(where: { origins[$0]?.contains(.tagMBID) == true }), !signals.uniqueBarcodes.isEmpty || !signals.uniqueCatalogNumbers.isEmpty {
+            log("The release ID in the tags does not match the barcode / catalog number found; searching every edition.")
         }
         let fast = config.fastPathWhenTagged && taggedFit
         var fingerprints: FingerprintOutcome? = nil
