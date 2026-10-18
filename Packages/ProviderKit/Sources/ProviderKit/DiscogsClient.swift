@@ -126,12 +126,12 @@ public actor DiscogsClient {
     // MARK: Rate-limited HTTP
 
     private func sendRateLimited(url: URL) async throws -> Data {
-        let now = Date()
-        if now < nextAllowedRequest {
-            let wait = nextAllowedRequest.timeIntervalSince(now)
-            try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000))
-        }
-        nextAllowedRequest = Date().addingTimeInterval(1.05)
+        // Reserve a slot before waiting: concurrent callers (the actor is
+        // re-entered while one sleeps) each get their own, 1.05 s apart.
+        let slot = max(Date(), nextAllowedRequest)
+        nextAllowedRequest = slot.addingTimeInterval(1.05)
+        let wait = slot.timeIntervalSinceNow
+        if wait > 0 { try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
 
         var req = URLRequest(url: url, timeoutInterval: 20)
         req.setValue(userAgent, forHTTPHeaderField: "User-Agent")

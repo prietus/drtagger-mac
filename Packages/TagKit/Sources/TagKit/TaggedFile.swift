@@ -1,5 +1,6 @@
 import FLACKit
 import Foundation
+import LibraryKit
 
 public struct TagWriteReport: Sendable, Codable, Equatable, Hashable {
     public let path: String
@@ -51,6 +52,7 @@ public enum TaggedFile {
     }
 
     public static func read(_ url: URL) throws -> ContainerContents {
+        let url = url.onDisk
         switch try container(for: url) {
         case .flac: return try FLACContainer.read(url: url)
         case .dsf: return try DSFContainer.read(url: url)
@@ -65,6 +67,7 @@ public enum TaggedFile {
     // Tags only: no audio is read (no digest, no picture payloads), so it is
     // cheap enough for indexing a whole library over the network.
     public static func readTags(_ url: URL) throws -> TagSet {
+        let url = url.onDisk
         switch try container(for: url) {
         case .flac: return try FLACContainer.read(url: url, withDigest: false).tags
         case .dsf: return try DSFContainer.read(url: url, withDigest: false).tags
@@ -85,6 +88,7 @@ public enum TaggedFile {
     // compared with the original; a mismatch leaves the original untouched.
     @discardableResult
     public static func write(_ url: URL, tags: TagSet, pictures: [Picture]? = nil, expectedDigest: String? = nil) throws -> TagWriteReport {
+        let url = url.onDisk
         let kind = try container(for: url)
         let before = try expectedDigest ?? read(url).audioDigest
         return try replacing(url, kind: kind, expectedDigest: before, pictureCount: pictures?.count ?? -1) { out in
@@ -102,6 +106,7 @@ public enum TaggedFile {
 
     @discardableResult
     public static func restore(_ url: URL, from backup: TagBackup) throws -> TagWriteReport {
+        let url = url.onDisk
         let kind = try container(for: url)
         return try replacing(url, kind: kind, expectedDigest: backup.audioDigest, pictureCount: backup.pictures.count) { out in
             switch kind {
@@ -122,11 +127,14 @@ public enum TaggedFile {
     }
 
     private static func replacing(_ url: URL, kind: TagContainer, expectedDigest: String, pictureCount: Int, body: (FileHandle) throws -> String) throws -> TagWriteReport {
-        let tmp = url.deletingLastPathComponent().appending(path: ".\(url.lastPathComponent).drtagger.tmp")
+        // The temporary file lives next to the original, built from the
+        // original's exact path bytes (NFC names on network shares).
+        let tmp = URL(fileURLWithPath: url.deletingLastPathComponent().path + "/." + url.lastPathComponent + ".drtagger.tmp").onDisk
         let fm = FileManager.default
         try? fm.removeItem(at: tmp)
-        guard fm.createFile(atPath: tmp.path, contents: nil) else { throw CocoaError(.fileWriteUnknown) }
-        let out = try FileHandle(forWritingTo: tmp)
+        let fd = tmp.path.withCString { open($0, O_WRONLY | O_CREAT | O_TRUNC, 0o644) }
+        guard fd >= 0 else { throw CocoaError(.fileWriteUnknown) }
+        let out = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         var digest = ""
         do {
             digest = try body(out)
@@ -141,9 +149,14 @@ public enum TaggedFile {
             throw TagFileError.audioChanged(expected: expectedDigest, actual: digest)
         }
         let size = (try? tmp.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
-        let attrs = try? fm.attributesOfItem(atPath: url.path)
+        let created = try? url.resourceValues(forKeys: [.creationDateKey]).creationDate
         _ = try fm.replaceItemAt(url, withItemAt: tmp)
-        if let created = attrs?[.creationDate] { try? fm.setAttributes([.creationDate: created], ofItemAtPath: url.path) }
+        if let created {
+            var u = url
+            var values = URLResourceValues()
+            values.creationDate = created
+            try? u.setResourceValues(values)
+        }
         return TagWriteReport(path: url.path, container: kind, audioDigest: digest, bytesWritten: size, pictureCount: max(0, pictureCount))
     }
 }

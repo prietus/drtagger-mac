@@ -40,7 +40,7 @@ public struct CRC32: Sendable {
 
     // CRC of a byte range of a file, read in chunks.
     public static func checksum(fileAt url: URL, range: Range<Int64>, chunkSize: Int = 4 << 20) throws -> UInt32 {
-        let handle = try FileHandle(forReadingFrom: url)
+        let handle = try FileHandle(forReadingFrom: url.onDisk)
         defer { try? handle.close() }
         try handle.seek(toOffset: UInt64(range.lowerBound))
         var remaining = range.upperBound - range.lowerBound

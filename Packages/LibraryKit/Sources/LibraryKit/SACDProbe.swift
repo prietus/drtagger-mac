@@ -83,14 +83,14 @@ public enum SACDProbe {
 
     // Cheap check: only the master TOC sector is read.
     public static func isSACD(url: URL) -> Bool {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
+        guard let handle = try? FileHandle(forReadingFrom: url.onDisk) else { return false }
         defer { try? handle.close() }
         guard let data = try? read(handle, sector: masterTOCSector) else { return false }
         return data.count >= 8 && data.prefix(8) == Data("SACDMTOC".utf8)
     }
 
     public static func probe(url: URL) throws -> SACDInfo {
-        let handle = try FileHandle(forReadingFrom: url)
+        let handle = try FileHandle(forReadingFrom: url.onDisk)
         defer { try? handle.close() }
 
         let master = try read(handle, sector: masterTOCSector)

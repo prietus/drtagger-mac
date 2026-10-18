@@ -80,7 +80,9 @@ public final class FileHandleDataSource: FLACDataSource, @unchecked Sendable {
     private let lock = NSLock()
 
     public init(url: URL) throws {
-        let h = try FileHandle(forReadingFrom: url)
+        // Exact path bytes: see LibraryKit's URL.onDisk (NFC names on NFS shares).
+        let raw = url.isFileURL ? url.path.withCString { URL(fileURLWithFileSystemRepresentation: $0, isDirectory: false, relativeTo: nil) } : url
+        let h = try FileHandle(forReadingFrom: raw)
         self.handle = h
         let end = try h.seekToEnd()
         try h.seek(toOffset: 0)

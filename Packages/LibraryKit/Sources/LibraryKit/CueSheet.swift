@@ -212,7 +212,7 @@ public struct CueSheet: Sendable, Equatable, Hashable, Codable {
     }
 
     public static func parse(url: URL) throws -> CueSheet {
-        try parse(data: Data(contentsOf: url))
+        try parse(data: Data(contentsOf: url.onDisk))
     }
 
     public static func parse(data: Data) throws -> CueSheet {

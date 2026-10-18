@@ -126,3 +126,16 @@ extension ProvidersLiveTests {
         #expect(await AcoustIDClient(clientKey: "", userAgent: Self.ua).validateKey() == .invalid("No key entered"))
     }
 }
+
+@Suite("Rate limits (network)") struct RateLimitTests {
+    @Test func concurrentCallsAreSpaced() async throws {
+        guard ProcessInfo.processInfo.environment["DRTAGGER_NETWORK_TESTS"] == "1" else { return }
+        let mb = MusicBrainzClient(userAgent: "drtagger-mac-tests/0.1 (+https://drtagger.priet.us)")
+        let start = Date()
+        await withTaskGroup(of: Void.self) { group in
+            for _ in 0..<4 { group.addTask { _ = try? await mb.searchByBarcode("074646493526") } }
+        }
+        let elapsed = Date().timeIntervalSince(start)
+        #expect(elapsed >= 3.1, "4 concurrent requests took \(elapsed) s; they must be ≥ 1.05 s apart")
+    }
+}

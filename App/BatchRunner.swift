@@ -44,8 +44,19 @@ final class BatchRunner {
     private(set) var startedAt: Date?
     private(set) var finishedAtStart = 0
     private(set) var indexing: String?
-    private(set) var networkActivity: String?
+    private(set) var identifying: [String] = []
     private(set) var cpuActivity: String?
+    var networkActivity: String? {
+        switch identifying.count {
+        case 0: return nil
+        case 1: return String(localized: "Identifying \(identifying[0])")
+        default: return String(localized: "Identifying \(identifying.count) albums: \(identifying.joined(separator: ", "))")
+        }
+    }
+    // Albums identified at once. The provider clients are shared, so the
+    // services' rate limits hold whatever this is; the gain is in the waits
+    // and the local reads (tags, scans, fingerprints) overlapping.
+    nonisolated static let identificationWorkers = 4
     var mode: Mode {
         get { Mode(rawValue: UserDefaults.standard.string(forKey: "batch.mode") ?? "") ?? .importToLibrary }
         set { UserDefaults.standard.set(newValue.rawValue, forKey: "batch.mode") }
@@ -116,12 +127,14 @@ final class BatchRunner {
                 await index.ensure(root: root)
                 indexing = nil
             }
-            async let network: Void = networkWorker()
+            async let network: Void = withTaskGroup(of: Void.self) { group in
+                for _ in 0..<Self.identificationWorkers { group.addTask { await self.networkWorker() } }
+            }
             async let cpu: Void = cpuWorker()
             _ = await (network, cpu)
             isRunning = false
             stopping = false
-            networkActivity = nil
+            identifying = []
             cpuActivity = nil
             save()
         }
@@ -202,9 +215,9 @@ final class BatchRunner {
         guard let library, let identify, let settings else { return }
         let members = library.members(of: r)
         set(members, .working, note: String(localized: "Identifying"))
-        networkActivity = String(localized: "Identifying \(r.displayTitle)")
+        identifying.append(r.displayTitle)
         await identify.identify(r, members: members, settings: settings, fastPathWhenTagged: true)
-        networkActivity = nil
+        if let i = identifying.firstIndex(of: r.displayTitle) { identifying.remove(at: i) }
         if let error = identify.error(for: r) {
             set(members, .failed, note: error)
         } else if let result = r.identification, result.isConfident, TagService.chosenCandidate(r) != nil {

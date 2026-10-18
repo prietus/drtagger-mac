@@ -1,3 +1,4 @@
+import LibraryKit
 import AppKit
 import ImageIO
 import SwiftUI
@@ -68,7 +69,7 @@ struct ImageViewerSheet: View {
         if let data {
             source = CGImageSourceCreateWithData(data as CFData, nil)
         } else if let url = item.url {
-            source = CGImageSourceCreateWithURL(url as CFURL, nil)
+            source = CGImageSourceCreateWithURL(url.onDisk as CFURL, nil)
         } else {
             source = nil
         }

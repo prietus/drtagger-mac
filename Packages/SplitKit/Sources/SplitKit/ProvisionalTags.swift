@@ -79,6 +79,6 @@ public enum ProvisionalTags {
         let data = try file.rewritten(with: comment, source: source)
         let tmp = url.deletingLastPathComponent().appending(path: ".\(url.lastPathComponent).tmp")
         try data.write(to: tmp, options: .atomic)
-        _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)
+        _ = try FileManager.default.replaceItemAt(url.onDisk, withItemAt: tmp)
     }
 }

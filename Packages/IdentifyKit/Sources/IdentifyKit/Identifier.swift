@@ -60,9 +60,10 @@ public actor Identifier {
     public init(config: IdentifierConfig, tool: FFmpegTool) {
         self.config = config
         self.tool = tool
-        musicBrainz = MusicBrainzClient(userAgent: config.userAgent)
-        discogs = config.discogsToken.flatMap { $0.isEmpty ? nil : DiscogsClient(userAgent: config.userAgent, token: $0) }
-        acoustID = config.acoustIDKey.flatMap { $0.isEmpty ? nil : AcoustIDClient(clientKey: $0, userAgent: config.userAgent) }
+        let clients = ProviderClients.shared(userAgent: config.userAgent, acoustIDKey: config.acoustIDKey, discogsToken: config.discogsToken)
+        musicBrainz = clients.musicBrainz
+        discogs = clients.discogs
+        acoustID = clients.acoustID
     }
 
     public func identify(

@@ -25,6 +25,7 @@ import Foundation
 // ] }
 
 public actor AcoustIDClient {
+    private var nextAllowedRequest: Date = .distantPast
 
     public struct Match: Sendable, Equatable {
         public let score: Double                // 0.0 – 1.0
@@ -115,6 +116,11 @@ public actor AcoustIDClient {
         req.httpBody = Data(body.utf8)
         print("[ACOUSTID] POST body size=\(body.count), fingerprint size=\(fingerprint.count)")
 
+        // AcoustID allows 3 requests per second per client key.
+        let slot = max(Date(), nextAllowedRequest)
+        nextAllowedRequest = slot.addingTimeInterval(0.35)
+        let wait = slot.timeIntervalSinceNow
+        if wait > 0 { try await Task.sleep(nanoseconds: UInt64(wait * 1_000_000_000)) }
         let (data, resp) = try await session.data(for: req)
 
         // Debug: log raw response

@@ -228,7 +228,7 @@ final class DiscService {
     private static func trash(_ urls: [URL], record: AlbumRecord) {
         var problems: [String] = []
         for url in urls {
-            do { try FileManager.default.trashItem(at: url, resultingItemURL: nil) }
+            do { try FileManager.default.trashItem(at: url.onDisk, resultingItemURL: nil) }
             catch { problems.append("\(url.lastPathComponent): \(error.localizedDescription)") }
         }
         if !problems.isEmpty { record.errorMessage = String(localized: "Could not move originals to the Trash: ") + problems.joined(separator: "; ") }

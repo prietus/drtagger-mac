@@ -203,9 +203,13 @@ extension ContentView {
     // `--batch import|update` runs the batch over the queue and prints a
     // summary line per album on stderr when it ends.
     func batchFromLaunchArguments(_ arguments: [String] = CommandLine.arguments) async {
-        guard let i = arguments.firstIndex(of: "--batch") else { return }
-        let mode: BatchRunner.Mode = (i + 1 < arguments.count && arguments[i + 1] == "update") ? .updateInPlace : .importToLibrary
-        batch.start(mode: mode, dryRun: arguments.contains("--dry-run"))
+        if arguments.contains("--resume") {
+            batch.resume()
+        } else {
+            guard let i = arguments.firstIndex(of: "--batch") else { return }
+            let mode: BatchRunner.Mode = (i + 1 < arguments.count && arguments[i + 1] == "update") ? .updateInPlace : .importToLibrary
+            batch.start(mode: mode, dryRun: arguments.contains("--dry-run"))
+        }
         while batch.isRunning { try? await Task.sleep(for: .milliseconds(500)) }
         for r in library.allRecords().sorted(by: BatchRunner.queueOrder) {
             let status = r.batchStatus?.rawValue ?? "none"

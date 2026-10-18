@@ -105,7 +105,7 @@ public actor ImageSplitter {
 
         // 1. Source files, in CUE order.
         let sources = cue.files.map { $0.url(relativeTo: disc.folder) }
-        for s in sources where !FileManager.default.fileExists(atPath: s.path) {
+        for s in sources where !s.existsOnDisk {
             throw SplitError.missingFile(s.lastPathComponent)
         }
 
@@ -194,7 +194,7 @@ public actor ImageSplitter {
                 "album": albumValues["album"] ?? "",
             ], ascii: options.asciiFileNames)
             let url = outputFolder.appending(path: (name.isEmpty ? String(format: "%02d", track.number) : name) + ".flac", directoryHint: .notDirectory)
-            if FileManager.default.fileExists(atPath: url.path) {
+            if url.existsOnDisk {
                 guard options.overwriteExisting else { throw SplitError.outputExists(url.lastPathComponent) }
                 try FileManager.default.removeItem(at: url)
             }
@@ -270,7 +270,7 @@ public actor ImageSplitter {
     }
 
     private static func append(_ source: URL, to sink: FileHandle) throws {
-        let reader = try FileHandle(forReadingFrom: source)
+        let reader = try FileHandle(forReadingFrom: source.onDisk)
         defer { try? reader.close() }
         while let chunk = try reader.read(upToCount: 4 << 20), !chunk.isEmpty {
             try sink.write(contentsOf: chunk)

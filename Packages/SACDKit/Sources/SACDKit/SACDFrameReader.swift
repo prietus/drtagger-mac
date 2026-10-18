@@ -100,7 +100,7 @@ public final class SACDFrameReader {
     public let totalSectors: UInt64
 
     public init(url: URL, firstSector: UInt32, lastSector: UInt32) throws {
-        guard let h = try? FileHandle(forReadingFrom: url) else { throw ReaderError.cannotOpen(url.path) }
+        guard let h = try? FileHandle(forReadingFrom: url.onDisk) else { throw ReaderError.cannotOpen(url.path) }
         handle = h
         nextSector = UInt64(firstSector)
         endSector = UInt64(lastSector)

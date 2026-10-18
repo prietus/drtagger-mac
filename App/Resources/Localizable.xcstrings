@@ -2214,6 +2214,16 @@
         }
       }
     },
+    "Identifying %lld albums: %@": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identificando %1$lld álbumes: %2$@"
+          }
+        }
+      }
+    },
     "Identifying…": {
       "localizations": {
         "es": {

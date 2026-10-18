@@ -1,4 +1,5 @@
 import Foundation
+import LibraryKit
 import Observation
 import ProviderKit
 import TagKit
@@ -53,7 +54,7 @@ final class LibraryIndexService {
         let found: [LibraryIndexEntry] = await Task.detached(priority: .utility) {
             folders.compactMap { folder -> LibraryIndexEntry? in
                 let fm = FileManager.default
-                let files = (try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+                let files = (try? fm.contentsOfDirectory(at: folder.onDisk, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
                 guard let first = files.filter({ TagContainer.from(url: $0) != nil }).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }).first,
                       let tags = try? TaggedFile.readTags(first) else { return nil }
                 let modified = (try? folder.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()

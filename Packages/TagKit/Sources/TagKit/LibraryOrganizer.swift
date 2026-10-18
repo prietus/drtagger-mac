@@ -1,4 +1,5 @@
 import Foundation
+import LibraryKit
 import SplitKit
 
 // Moves tagged files into the library layout: root / album folder template
@@ -88,14 +89,14 @@ public enum LibraryOrganizer {
         var done: [Move] = []
         for m in moves {
             try fm.createDirectory(at: m.to.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if fm.fileExists(atPath: m.to.path) { throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: m.to.path]) }
-            try fm.moveItem(at: m.from, to: m.to)
+            if m.to.existsOnDisk { throw CocoaError(.fileWriteFileExists, userInfo: [NSFilePathErrorKey: m.to.path]) }
+            try fm.moveItem(at: m.from.onDisk, to: m.to)
             done.append(m)
         }
         // Sidecars: per source folder, when it no longer holds audio.
         let sources = Set(done.map { $0.from.deletingLastPathComponent().standardizedFileURL })
         for source in sources {
-            guard let items = try? fm.contentsOfDirectory(at: source, includingPropertiesForKeys: [.isRegularFileKey], options: []) else { continue }
+            guard let items = try? fm.contentsOfDirectory(at: source.onDisk, includingPropertiesForKeys: [.isRegularFileKey], options: []) else { continue }
             let audioLeft = items.contains { TagContainer.from(url: $0) != nil }
             guard !audioLeft, let destination = done.first(where: { $0.from.deletingLastPathComponent().standardizedFileURL == source })?.to.deletingLastPathComponent() else { continue }
             for item in items {
@@ -103,15 +104,15 @@ public enum LibraryOrganizer {
                 if name.hasPrefix(".") { try? fm.removeItem(at: item); continue }
                 guard sidecarExtensions.contains(item.pathExtension.lowercased()) || (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
                 let to = destination.appending(path: name)
-                if fm.fileExists(atPath: to.path) { continue }
+                if to.existsOnDisk { continue }
                 if (try? fm.moveItem(at: item, to: to)) != nil { done.append(Move(from: item, to: to)) }
             }
-            if let left = try? fm.contentsOfDirectory(atPath: source.path), left.isEmpty {
-                try? fm.removeItem(at: source)
+            if let left = try? fm.contentsOfDirectory(at: source.onDisk, includingPropertiesForKeys: nil, options: []).map(\.lastPathComponent), left.isEmpty {
+                try? fm.removeItem(at: source.onDisk)
                 // Parent folders emptied by this ("Artist/Album/Disc 1").
                 var parent = source.deletingLastPathComponent()
-                while let rest = try? fm.contentsOfDirectory(atPath: parent.path), rest.filter({ !$0.hasPrefix(".") }).isEmpty, parent.pathComponents.count > 3 {
-                    try? fm.removeItem(at: parent)
+                while let rest = try? fm.contentsOfDirectory(at: parent.onDisk, includingPropertiesForKeys: nil, options: []).map(\.lastPathComponent), rest.filter({ !$0.hasPrefix(".") }).isEmpty, parent.pathComponents.count > 3 {
+                    try? fm.removeItem(at: parent.onDisk)
                     parent = parent.deletingLastPathComponent()
                 }
             }

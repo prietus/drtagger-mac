@@ -129,7 +129,7 @@ public struct SACDExtractor: Sendable {
                 "album": album,
             ], ascii: options.asciiFileNames)
             let url = outputFolder.appending(path: (name.isEmpty ? String(format: "%02d", track.number) : name) + ".dsf", directoryHint: .notDirectory)
-            if FileManager.default.fileExists(atPath: url.path) {
+            if url.existsOnDisk {
                 guard options.overwriteExisting else { throw SACDExtractError.outputExists(url.lastPathComponent) }
                 try FileManager.default.removeItem(at: url)
             }

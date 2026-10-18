@@ -174,13 +174,12 @@ public struct LibraryScanner: Sendable {
         var result = ScanResult()
         var seen = Set<String>()
         for root in roots {
-            let std = root.standardizedFileURL
-            var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: std.path, isDirectory: &isDir) else {
+            let std = root.standardizedFileURL.onDisk
+            guard std.existsOnDisk else {
                 result.issues.append(ScanIssue(url: std, message: "Path does not exist."))
                 continue
             }
-            if isDir.boolValue {
+            if std.isDirectoryOnDisk {
                 walk(std, into: &result, progress: progress)
             } else {
                 scanSingleFile(std, into: &result)
@@ -292,7 +291,7 @@ public struct LibraryScanner: Sendable {
                 continue
             }
             let refs = sheet.referencedFiles(relativeTo: folder)
-            let existing = refs.filter { FileManager.default.fileExists(atPath: $0.path) }
+            let existing = refs.map(\.onDisk).filter(\.existsOnDisk)
 
             if refs.count == 1, existing.count == 1, let image = trackFile(existing[0], allowRaw: true) {
                 var disc = DetectedDisc(number: 1, folder: folder)

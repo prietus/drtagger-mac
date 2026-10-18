@@ -88,7 +88,7 @@ public actor CoverArtFetcher {
     public func fetch(_ option: ArtworkOption) async -> FetchedArtwork? {
         let data: Data
         if option.isLocal {
-            guard let d = try? Data(contentsOf: option.url) else { return nil }
+            guard let d = try? Data(contentsOf: option.url.onDisk) else { return nil }
             data = d
         } else {
             var req = URLRequest(url: option.url)

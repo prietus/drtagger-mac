@@ -362,7 +362,7 @@ actor ThumbnailLoader {
 
     nonisolated static func decode(_ url: URL, maxPixel: Int) -> CGImage? {
         let sourceOptions: [CFString: Any] = [kCGImageSourceShouldCache: false]
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, sourceOptions as CFDictionary) else { return nil }
+        guard let source = CGImageSourceCreateWithURL(url.onDisk as CFURL, sourceOptions as CFDictionary) else { return nil }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixel,

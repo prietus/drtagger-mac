@@ -95,11 +95,11 @@ final class AlbumRecord {
         set { stateRaw = newValue.rawValue; updatedAt = Date() }
     }
 
-    var url: URL { URL(fileURLWithPath: path) }
+    var url: URL { URL(fileURLWithPath: path).onDisk }
 
     var detected: DetectedAlbum? {
         guard let detailsData else { return nil }
-        return try? JSONDecoder().decode(DetectedAlbum.self, from: detailsData)
+        return (try? JSONDecoder().decode(DetectedAlbum.self, from: detailsData))?.onDisk()
     }
 
     var issues: [ScanIssue] {
@@ -169,7 +169,7 @@ final class AlbumRecord {
         var path = url.path
         var hops = 0
         while let next = moves[path], hops < 8 { path = next; hops += 1 }
-        return path == url.path ? url : URL(fileURLWithPath: path)
+        return (path == url.path ? url : URL(fileURLWithPath: path)).onDisk
     }
 
     var tagLocks: Set<String> {

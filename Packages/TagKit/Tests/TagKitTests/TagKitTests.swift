@@ -378,3 +378,22 @@ enum Fixtures {
         #expect(again == index)
     }
 }
+
+@Suite("Composed file names") struct ComposedNameTests {
+    // A share that keeps names composed (NFC) while Foundation decomposes
+    // path strings: APFS is normalisation-insensitive, so this only proves
+    // the rebuilt-URL path still works locally; the NFS case is covered by
+    // using URL.onDisk wherever a stored path is opened.
+    @Test func rebuiltURLsOpenAndWrite() throws {
+        let dir = try Fixtures.tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let folder = dir.appending(path: "Heroes Neuk\u{00F6}ln")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let original = folder.appending(path: "09 Neuk\u{00F6}ln.wav")
+        try Fixtures.wav().write(to: original)
+        let stored = try JSONDecoder().decode(URL.self, from: try JSONEncoder().encode(original))
+        var t = TagSet(); t.set(TagField.title, "Neuköln")
+        try TaggedFile.write(stored, tags: t)
+        #expect(try TaggedFile.readTags(stored.onDisk).first(TagField.title) == "Neuköln")
+        #expect(stored.onDisk.existsOnDisk && folder.onDisk.isDirectoryOnDisk)
+    }
+}

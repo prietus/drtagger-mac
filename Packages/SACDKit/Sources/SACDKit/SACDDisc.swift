@@ -83,7 +83,7 @@ public enum SACDDiscReader {
 
     public static func read(url: URL) throws -> SACDDisc {
         let info = try SACDProbe.probe(url: url)
-        let handle = try FileHandle(forReadingFrom: url)
+        let handle = try FileHandle(forReadingFrom: url.onDisk)
         defer { try? handle.close() }
 
         let master = try sector(handle, Scarletbook.masterTOCSector)
