@@ -655,6 +655,16 @@
         }
       }
     },
+    "Album only, no edition: ": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Álbum, sin edición: "
+          }
+        }
+      }
+    },
     "Album": {
       "localizations": {
         "es": {
@@ -3937,6 +3947,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Tagueado como otra release (%1$@); drtagger propone %2$@"
+          }
+        }
+      }
+    },
+    "Tagged as the album, without an edition": {
+      "localizations": {
+        "es": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tagueado como álbum, sin edición"
           }
         }
       }

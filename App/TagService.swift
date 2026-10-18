@@ -169,6 +169,10 @@ final class TagService {
         context.freedbDiscID = leader.toc?.freeDBDiscID
         context.writeGenres = settings.writeGenresFromDiscogs
         context.acoustIDs = identification?.fingerprints?.acoustIDs ?? [:]
+        if leader.albumOnly {
+            context.albumOnly = true
+            context.mediaOverride = identification?.signals.localFormat == .sacd ? "SACD" : nil
+        }
         let locks = leader.tagLocks
         var warnings: [String] = []
         // Per disc: what the release lists against what the files cover.

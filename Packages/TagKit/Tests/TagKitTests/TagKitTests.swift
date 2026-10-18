@@ -134,6 +134,22 @@ enum Fixtures {
         #expect(PicardMapper.normalizedRole("Guitar [Acoustic]") == "acoustic guitar")
     }
 
+    @Test func albumOnlyLeavesTheEditionOut() throws {
+        var ctx = TagContext()
+        ctx.albumOnly = true
+        ctx.mediaOverride = "SACD"
+        ctx.musicBrainzDiscID = "disc-1"
+        let t = try #require(PicardMapper.trackTags(Self.candidate, media: Self.candidate.media, index: 0, context: ctx))
+        #expect(t.first(TagField.album) == "Kind of Blue" && t.first(TagField.title) == "So What")
+        #expect(t.first(TagField.date) == "1959-08-17" && t.first(TagField.originalYear) == "1959")
+        #expect(t.first(TagField.mbReleaseGroupID) == "rg-1" && t.first(TagField.mbTrackID) == "rec-1")
+        #expect(t.first(TagField.media) == "SACD")
+        for field in [TagField.mbAlbumID, TagField.mbReleaseTrackID, TagField.label, TagField.catalogNumber, TagField.barcode,
+                      TagField.releaseCountry, TagField.releaseStatus, TagField.mbDiscID, TagField.script] {
+            #expect(t[field].isEmpty, "\(field) belongs to one edition")
+        }
+    }
+
     @Test func tagsByDiscPosition() throws {
         let media = [CandidateMedium(position: 1, format: "CD", title: "Atto primo", tracks: [CandidateTrack(position: 1, title: "Ouverture"), CandidateTrack(position: 2, title: "Notte e giorno")]),
                      CandidateMedium(position: 2, format: "CD", title: "Atto secondo", tracks: [CandidateTrack(position: 1, title: "Eh via buffone")])]

@@ -12,6 +12,11 @@ public struct TagContext: Sendable {
     public var writeFingerprints = false
     public var writeGenres = true
     public var includeDiscogsCredits = true
+    // The album is known (title, tracks, recordings) but not the edition
+    // the files come from: nothing that belongs to one pressing is written,
+    // and MEDIA says what the files are.
+    public var albumOnly = false
+    public var mediaOverride: String?
 
     public init() {}
 }
@@ -29,30 +34,22 @@ public enum PicardMapper {
         t.set(TagField.albumArtist, c.artist)
         t.set(TagField.albumArtistSort, c.artistSort)
         for id in c.artistIDs { t.add(TagField.mbAlbumArtistID, id) }
-        t.set(TagField.date, c.releasedDate ?? c.year)
         if let original = c.firstReleaseDate {
             t.set(TagField.originalDate, original)
             t.set(TagField.originalYear, String(original.prefix(4)))
         }
-        for label in split(c.label) { t.add(TagField.label, label) }
-        for cat in c.catalogNumbers { t.add(TagField.catalogNumber, cat) }
-        t.set(TagField.barcode, c.barcode)
-        t.set(TagField.releaseCountry, c.country)
-        t.set(TagField.releaseStatus, c.status?.lowercased())
+        if context.albumOnly {
+            t.set(TagField.date, c.firstReleaseDate ?? c.year)
+            t.set(TagField.mbReleaseGroupID, c.source == .musicbrainz ? c.releaseGroupID : nil)
+        } else {
+            editionTags(&t, c, context: context)
+        }
+        // The release group's type, shared by every edition.
         if let primary = c.primaryType { t.add(TagField.releaseType, primary.lowercased()) }
         for secondary in c.secondaryTypes { t.add(TagField.releaseType, secondary.lowercased()) }
-        t.set(TagField.script, c.script)
         let discCount = max(1, media.count)
         t.set(TagField.discTotal, String(discCount))
         t.set(TagField.totalDiscs, String(discCount))
-        if c.source == .musicbrainz {
-            t.set(TagField.mbAlbumID, c.providerID)
-            t.set(TagField.mbReleaseGroupID, c.releaseGroupID)
-        } else if c.source == .discogs {
-            t.set(TagField.discogsReleaseID, c.providerID)
-        }
-        t.set(TagField.mbDiscID, context.musicBrainzDiscID)
-        t.set(TagField.discID, context.freedbDiscID)
         if c.artistIDs.contains(variousArtistsID) || c.artist.lowercased() == "various artists" {
             t.set(TagField.compilation, "1")
         }
@@ -62,6 +59,25 @@ public enum PicardMapper {
             for s in source?.styles ?? [] { t.add(TagField.style, s) }
         }
         return t
+    }
+
+    // What belongs to one pressing: its date, label, codes and IDs.
+    private static func editionTags(_ t: inout TagSet, _ c: Candidate, context: TagContext) {
+        t.set(TagField.date, c.releasedDate ?? c.year)
+        for label in split(c.label) { t.add(TagField.label, label) }
+        for cat in c.catalogNumbers { t.add(TagField.catalogNumber, cat) }
+        t.set(TagField.barcode, c.barcode)
+        t.set(TagField.releaseCountry, c.country)
+        t.set(TagField.releaseStatus, c.status?.lowercased())
+        t.set(TagField.script, c.script)
+        if c.source == .musicbrainz {
+            t.set(TagField.mbAlbumID, c.providerID)
+            t.set(TagField.mbReleaseGroupID, c.releaseGroupID)
+        } else if c.source == .discogs {
+            t.set(TagField.discogsReleaseID, c.providerID)
+        }
+        t.set(TagField.mbDiscID, context.musicBrainzDiscID)
+        t.set(TagField.discID, context.freedbDiscID)
     }
 
     // Tags for the local track at `index` (0-based across the whole album).
@@ -103,11 +119,11 @@ public enum PicardMapper {
         t.set(TagField.totalTracks, String(medium.tracks.count))
         t.set(TagField.discNumber, String(discNumber))
         t.set(TagField.discSubtitle, medium.title)
-        t.set(TagField.media, medium.format)
+        t.set(TagField.media, context.mediaOverride ?? medium.format)
         for isrc in track.isrcs { t.add(TagField.isrc, isrc) }
         if c.source == .musicbrainz {
             t.set(TagField.mbTrackID, track.recordingID)
-            t.set(TagField.mbReleaseTrackID, track.trackID)
+            if !context.albumOnly { t.set(TagField.mbReleaseTrackID, track.trackID) }
         }
         for work in track.works {
             t.add(TagField.work, work.title)

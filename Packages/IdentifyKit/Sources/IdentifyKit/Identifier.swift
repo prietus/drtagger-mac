@@ -91,6 +91,25 @@ public struct IdentificationResult: Sendable, Codable, Hashable {
         return total(pick) - rivalBest >= 30 ? pick : nil
     }
 
+    // DSD files whose SACD no database lists (unofficial pressings): the
+    // album is still certain when every track's fingerprint matches and the
+    // editions close to the best are all one release group. Its title,
+    // tracks and recordings can be written, nothing of any one edition.
+    public var albumOnlyPick: ScoredCandidate? {
+        guard signals.localFormat == .sacd, signals.trackCount > 0, fingerprints?.fingerprintedTracks == signals.trackCount,
+              !candidates.contains(where: { MatchScorer.isSACDEdition($0.candidate) }) else { return nil }
+        let proven = candidates.filter {
+            ($0.fingerprintCoverage ?? 0) >= 0.999 && $0.trackCountMatches == true && $0.candidate.source == .musicbrainz
+                && !MatchScorer.contradictsLocalCodes($0.candidate, signals: signals)
+        }
+        guard let pick = proven.first, let group = pick.candidate.releaseGroupID else { return nil }
+        let close = proven.filter { pick.score - $0.score < 30 }
+        guard close.allSatisfy({ $0.candidate.releaseGroupID == group }) else { return nil }
+        // CD and digital editions number their tracks 1…n, vinyl by side.
+        return close.first { c in (c.candidate.media.compactMap(\.format) + [c.candidate.mediaFormat ?? ""]).contains { f in
+            let f = f.lowercased(); return f.contains("cd") || f.contains("digital") } } ?? pick
+    }
+
     static func provesAudio(_ c: ScoredCandidate, signals: AlbumSignals) -> Bool {
         (c.fingerprintCoverage ?? 0) >= 0.999 && c.trackCountMatches == true && (c.durationFit ?? 0) >= 0.75
             && c.confidence >= .likely

@@ -59,6 +59,9 @@ final class AlbumRecord {
     // their DISCNUMBER, read from one track at scan time.
     var taggedReleaseKey: String?
     var taggedDiscNumber: Int?
+    // Tag the album without any edition's details (see
+    // IdentificationResult.albumOnlyPick).
+    var albumOnly = false
 
     init(detected: DetectedAlbum, issues: [ScanIssue] = [], addedAt: Date = Date()) {
         path = detected.id

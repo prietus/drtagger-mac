@@ -247,6 +247,10 @@ final class BatchRunner {
         } else if let result = r.identification, let pick = await coverTieBreak(result, r, members: members, settings: settings) {
             identify.select(pick, for: r, members: members)
             set(members, .readyToFinish, note: nil)
+        } else if let result = r.identification, let pick = result.albumOnlyPick {
+            identify.select(pick, for: r, members: members)
+            for m in members { m.albumOnly = true }
+            set(members, .readyToFinish, note: nil)
         } else if let result = r.identification, result.signals.localFormat == .sacd,
                   !result.candidates.contains(where: { MatchScorer.isSACDEdition($0.candidate) }),
                   result.best?.formatCompatibility != .fits {
@@ -302,7 +306,7 @@ final class BatchRunner {
         // A preview may already be running (the inspector of the selected
         // album): wait for it and use it rather than giving up.
         while tagging.isBusy(r) { try? await Task.sleep(for: .milliseconds(200)) }
-        if tagging.plan(for: r)?.candidateID != TagService.chosenCandidate(r)?.id {
+        if r.albumOnly || tagging.plan(for: r)?.candidateID != TagService.chosenCandidate(r)?.id {
             await tagging.buildPlan(r, members: members, settings: settings, lookUpArtworkWhenCovered: false)
         }
         guard let plan = tagging.plan(for: r) else {
@@ -341,10 +345,11 @@ final class BatchRunner {
             cpuActivity = nil
             let changed = plan.tracks.flatMap { $0.changedFields.map(\.name) }
             let fields = Array(NSOrderedSet(array: changed)).compactMap { $0 as? String }
-            let note: String
+            var note: String
             if plan.alreadyTagged { note = String(localized: "Already tagged with this release") }
             else if !plan.hasWork { note = String(localized: "Tags already match") }
             else { note = String(localized: "Would write \(fields.count) field(s): \(fields.prefix(6).joined(separator: ", "))\(fields.count > 6 ? "…" : "")") + (plan.cover != nil ? String(localized: " + cover") : "") }
+            if r.albumOnly { note = String(localized: "Album only, no edition: ") + note }
             set(members, .done, note: note)
             save()
             return
@@ -372,7 +377,7 @@ final class BatchRunner {
         if let error = tagging.error(for: r) {
             set(members, .failed, note: error)
         } else {
-            set(members, .done, note: nil)
+            set(members, .done, note: r.albumOnly ? String(localized: "Tagged as the album, without an edition") : nil)
             let folders = Set(members.flatMap { $0.tagReports.map { URL(fileURLWithPath: $0.path).deletingLastPathComponent() } })
             await index?.update(folders: Array(folders))
         }

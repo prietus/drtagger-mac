@@ -361,6 +361,27 @@ struct MatchScorerTests {
         #expect(result.coverTieBreak(distances: [:]) == nil, "no images")
     }
 
+    @Test func unofficialSACDIsTaggedAsTheAlbum() {
+        var signals = AlbumSignals()
+        signals.tracks = (0..<8).map { LocalTrack(index: $0, discNumber: 1, title: nil, durationSeconds: 300, url: nil) }
+        signals.isDSD = true
+        func scored(_ id: String, group: String, format: String, score: Double = 75) -> ScoredCandidate {
+            ScoredCandidate(candidate: Candidate(source: .musicbrainz, providerID: id, releaseGroupID: group, title: "Burn", artist: "Deep Purple", mediaFormat: format),
+                            score: score, confidence: .possible, reasons: [], origins: [.fingerprint], durationFit: 0.5,
+                            trackCountMatches: true, fingerprintCoverage: 1, formatCompatibility: .unlikely)
+        }
+        func result(_ c: [ScoredCandidate]) -> IdentificationResult {
+            IdentificationResult(signals: signals, fingerprints: FingerprintOutcome(fingerprintedTracks: 8, tracksWithHits: 8, votes: [], recordingIDs: [:]),
+                                 candidates: c, discogsCandidates: [], log: [], startedAt: Date(), elapsedSeconds: 0)
+        }
+        #expect(result([scored("lp", group: "burn", format: "12\" Vinyl"), scored("cd", group: "burn", format: "CD")]).albumOnlyPick?.candidate.providerID == "cd",
+                "CD numbering over vinyl sides")
+        #expect(result([scored("cd", group: "burn", format: "CD"), scored("best-of", group: "hits", format: "CD")]).albumOnlyPick == nil,
+                "the same recordings on another album: which one is unclear")
+        #expect(result([scored("cd", group: "burn", format: "CD"), scored("sacd", group: "burn", format: "SACD", score: 40)]).albumOnlyPick == nil,
+                "a SACD edition is known: pick it, not the album")
+    }
+
     @Test func printedWordsAreNotCatalogs() {
         let found = CatalogNumberParser.extract(from: ["EUROPE-2006", "MADE IN JAPAN 2006", "WPZR-30194", "RECORDED IN 1969",
                                                        "HOLLYWOOD, CA 90068", "FOR 1954", "THIS 2011"]).map(\.formatted)

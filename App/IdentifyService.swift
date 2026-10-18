@@ -101,6 +101,7 @@ final class IdentifyService {
     func select(_ candidate: ScoredCandidate?, for record: AlbumRecord, members: [AlbumRecord] = []) {
         for m in (members.isEmpty ? [record] : members) {
             m.selectedCandidateID = candidate?.id
+            m.albumOnly = false
             if candidate != nil, m.state == .scanned { m.state = .needsReview }
         }
         try? record.modelContext?.save()
