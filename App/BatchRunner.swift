@@ -35,6 +35,8 @@ final class BatchRunner {
     }
 
     private(set) var isRunning = false
+
+    private(set) var isAttached = false
     private(set) var stopping = false
     // Preview run: identify and classify every album, write nothing.
     var dryRun: Bool {
@@ -71,6 +73,7 @@ final class BatchRunner {
 
     func attach(library: LibraryController, identify: IdentifyService, disc: DiscService, tagging: TagService, settings: AppSettings, index: LibraryIndexService) {
         self.library = library; self.identify = identify; self.disc = disc; self.tagging = tagging; self.settings = settings; self.index = index
+        isAttached = true
     }
 
     // Albums still to go and the pace so far: an estimate of the time left.
