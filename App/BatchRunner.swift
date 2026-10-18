@@ -185,10 +185,20 @@ final class BatchRunner {
         !dryRun && mode == .importToLibrary && r.kind == .sacdISO && members.contains(where: Workflow.needsFiles)
     }
 
+    // One fetch per call; release sets are grouped in memory (asking the
+    // library for each album's set members fetched every album again).
     private func next(where pick: (AlbumRecord, [AlbumRecord]) -> Bool) -> AlbumRecord? {
         guard let library else { return nil }
-        for r in library.allRecords().sorted(by: Self.queueOrder) where library.isLeader(r) {
-            if pick(r, library.members(of: r)) { return r }
+        let all = library.allRecords()
+        var sets: [String: [AlbumRecord]] = [:]
+        for r in all { if let id = r.setID { sets[id, default: []].append(r) } }
+        for (id, members) in sets {
+            sets[id] = members.sorted { ($0.setPosition ?? 0, $0.addedAt) < ($1.setPosition ?? 0, $1.addedAt) }
+        }
+        for r in all.sorted(by: Self.queueOrder) {
+            let members = r.setID.flatMap { sets[$0] } ?? [r]
+            guard members.first?.path == r.path else { continue }
+            if pick(r, members) { return r }
         }
         return nil
     }
