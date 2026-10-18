@@ -241,6 +241,9 @@ final class BatchRunner {
             // The release the files already name, and it fits: confirmed.
             identify.select(best, for: r, members: members)
             set(members, .readyToFinish, note: nil)
+        } else if let result = r.identification, result.isClearFingerprintMatch, let best = result.best {
+            identify.select(best, for: r, members: members)
+            set(members, .readyToFinish, note: nil)
         } else if let result = r.identification, !result.candidates.isEmpty {
             let best = result.best.map { "\($0.candidate.artist) – \($0.candidate.title) (\($0.confidence.rawValue))" } ?? ""
             set(members, .review, note: String(localized: "No sure match; best: \(best)"))

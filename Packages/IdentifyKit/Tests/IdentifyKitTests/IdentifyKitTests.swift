@@ -297,6 +297,26 @@ struct MatchScorerTests {
         #expect(c.plausibleTrackCounts.contains(12))
     }
 
+    @Test func clearFingerprintMatchNeedsAGapAndNoContradiction() {
+        var signals = AlbumSignals()
+        signals.tracks = (0..<8).map { LocalTrack(index: $0, discNumber: 1, title: nil, durationSeconds: 300, url: nil) }
+        func scored(_ id: String, _ score: Double, barcode: String? = nil) -> ScoredCandidate {
+            ScoredCandidate(candidate: Candidate(source: .musicbrainz, providerID: id, title: "The Berlin Concert", artist: "John Williams", barcode: barcode),
+                            score: score, confidence: .likely, reasons: [], origins: [.fingerprint], durationFit: 1,
+                            trackCountMatches: true, fingerprintCoverage: 1, formatCompatibility: nil)
+        }
+        func result(_ c: [ScoredCandidate], _ s: AlbumSignals, fingerprinted: Int = 8) -> IdentificationResult {
+            IdentificationResult(signals: s, fingerprints: FingerprintOutcome(fingerprintedTracks: fingerprinted, tracksWithHits: fingerprinted, votes: [], recordingIDs: [:]),
+                                 candidates: c, discogsCandidates: [], log: [], startedAt: Date(), elapsedSeconds: 0)
+        }
+        #expect(result([scored("a", 115)], signals).isClearFingerprintMatch, "the only edition")
+        #expect(result([scored("a", 115), scored("b", 90)], signals).isClearFingerprintMatch == false, "another edition within 30 points")
+        #expect(result([scored("a", 115)], signals, fingerprinted: 6).isClearFingerprintMatch == false, "two tracks without a fingerprint")
+        var coded = signals
+        coded.barcodes = [SignalValue("4988031321904", origin: .artwork)]
+        #expect(result([scored("a", 115, barcode: "724383608829")], coded).isClearFingerprintMatch == false, "the scanned barcode is another edition's")
+    }
+
     @Test func printedWordsAreNotCatalogs() {
         let found = CatalogNumberParser.extract(from: ["EUROPE-2006", "MADE IN JAPAN 2006", "WPZR-30194", "RECORDED IN 1969",
                                                        "HOLLYWOOD, CA 90068", "FOR 1954", "THIS 2011"]).map(\.formatted)

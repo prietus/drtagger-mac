@@ -36,16 +36,31 @@ public struct IdentificationResult: Sendable, Codable, Hashable {
         guard let best else { return false }
         guard best.confidence == .confident else { return false }
         // A confident pick must stand clear of the runner-up.
-        // The same pressing listed on MusicBrainz and on Discogs (one
-        // barcode) is not a rival.
-        let rival = candidates.dropFirst().first { c in
-            !(c.candidate.source != best.candidate.source && c.candidate.barcode != nil
-              && c.candidate.barcode.map { b in best.candidate.barcode.map { MatchScorer.barcodesEqual($0, b) } ?? false } == true)
-        }
-        if let second = rival, second.confidence == .confident, second.score >= best.score - 5 {
+        if let second = runnerUp, second.confidence == .confident, second.score >= best.score - 5 {
             return false
         }
         return true
+    }
+
+    // The best candidate's closest rival. The same pressing listed on
+    // MusicBrainz and on Discogs (one barcode) is not a rival.
+    public var runnerUp: ScoredCandidate? {
+        guard let best else { return nil }
+        return candidates.dropFirst().first { c in
+            !(c.candidate.source != best.candidate.source && c.candidate.barcode != nil
+              && c.candidate.barcode.map { b in best.candidate.barcode.map { MatchScorer.barcodesEqual($0, b) } ?? false } == true)
+        }
+    }
+
+    // Fingerprints alone, but unmistakable: every track matches, the track
+    // count and durations (within 2 s on average) fit, no other edition comes
+    // within 30 points and no barcode or catalog number found says otherwise.
+    // Ties between editions with the same audio stay for a person.
+    public var isClearFingerprintMatch: Bool {
+        guard let best, (best.fingerprintCoverage ?? 0) >= 0.999, fingerprints?.fingerprintedTracks == signals.trackCount,
+              best.trackCountMatches == true,
+              (best.durationFit ?? 0) >= 0.75, !MatchScorer.contradictsLocalCodes(best.candidate, signals: signals) else { return false }
+        return best.score - (runnerUp?.score ?? 0) >= 30
     }
 }
 
