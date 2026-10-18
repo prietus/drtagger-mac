@@ -149,7 +149,9 @@ public enum MatchScorer {
                 reasons.append("Track count differs (\(candidateCount) vs \(localCount))")
             }
         }
-        if signals.discCount > 1, !media.isEmpty {
+        // A set whose total is not declared (discs grouped from their tags or
+        // by hand) may be part of a bigger box: only a declared total counts.
+        if signals.discCount > 1, !media.isEmpty, !signals.isSet || signals.declaredDiscTotal != nil {
             if media.count == signals.discCount { score += 5; reasons.append("\(signals.discCount) discs") }
             else { score -= 15; reasons.append("Disc count differs (\(media.count) vs \(signals.discCount))") }
         }

@@ -62,7 +62,9 @@ final class IdentifyService {
             let setMembers = members.compactMap { m -> SignalCollector.SetMember? in
                 m.detected.map { SignalCollector.SetMember(album: $0, position: m.setPosition ?? 1, toc: m.toc, extractedTracks: Self.extractedStereoTracks(m)) }
             }
-            result = await identifier.identify(set: setMembers, declaredTotal: members.first?.setTotal, ctdb: ctdb, progress: progress)
+            // Only what the discs themselves declare ("disc 2 of 3", SACD album set).
+            let declared = members.compactMap { $0.detected?.discPosition?.total }.max()
+            result = await identifier.identify(set: setMembers, declaredTotal: declared, ctdb: ctdb, progress: progress)
         } else {
             result = await identifier.identify(album: album, toc: toc, ctdb: ctdb, extractedTracks: Self.extractedStereoTracks(record), progress: progress)
         }

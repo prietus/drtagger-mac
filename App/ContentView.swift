@@ -19,7 +19,7 @@ struct ContentView: View {
     var body: some View {
         @Bindable var library = library
         NavigationSplitView {
-            QueueSidebar(selection: $library.selection)
+            QueueSidebar()
                 .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 520)
         } detail: {
             if showBatchTable, BatchCounts(library.allRecords()).total > 0 {
@@ -224,7 +224,6 @@ struct QueueSidebar: View {
     @Environment(LibraryController.self) private var library
     // Newest scan first; albums added by the same scan in title order.
     @Query(sort: [SortDescriptor(\AlbumRecord.addedAt, order: .reverse), SortDescriptor(\AlbumRecord.displayTitle)]) private var albums: [AlbumRecord]
-    @Binding var selection: PersistentIdentifier?
     @State private var search = ""
     @State private var batchFilter: BatchFilter = .all
 
@@ -240,39 +239,51 @@ struct QueueSidebar: View {
     }
 
     var body: some View {
-        List(selection: $selection) {
+        @Bindable var library = library
+        List(selection: $library.multiSelection) {
             ForEach(filtered) { record in
                 QueueRow(record: record)
                     .tag(record.persistentModelID)
-                    .contextMenu {
-                        Button("Rescan") {
-                            Task { await library.rescan(record) }
-                        }
-                        Button("Show in Finder") {
-                            NSWorkspace.shared.activateFileViewerSelecting([record.url])
-                        }
-                        // Siblings are looked up when chosen, not for every row on every redraw.
-                        if record.setID == nil, record.detected?.discPosition != nil {
-                            Button("Group with Folder Siblings") {
-                                let siblings = library.siblingCandidates(of: record)
-                                if !siblings.isEmpty { library.group([record] + siblings) }
-                            }
-                        }
-                        if record.setID != nil {
-                            Button("Ungroup Release Set") { library.ungroup(record) }
-                        }
-                        Divider()
-                        Button("Remove from Queue", role: .destructive) {
-                            library.remove([record])
-                        }
+            }
+        }
+        .onChange(of: library.multiSelection) { _, ids in
+            if let current = library.selection, ids.contains(current) { return }
+            library.selection = filtered.first { ids.contains($0.persistentModelID) }?.persistentModelID
+        }
+        .contextMenu(forSelectionType: PersistentIdentifier.self) { ids in
+            let records = filtered.filter { ids.contains($0.persistentModelID) }
+            if records.count > 1 {
+                Button("Group as One Release (\(records.count) Discs)") { library.group(records) }
+                    .help("These albums are discs of one release; order them in the Release set section")
+                Divider()
+                Button("Remove \(records.count) Albums from Queue", role: .destructive) { library.remove(records) }
+            } else if let record = records.first {
+                Button("Rescan") {
+                    Task { await library.rescan(record) }
+                }
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([record.url])
+                }
+                // Siblings are looked up when chosen, not for every row on every redraw.
+                if record.setID == nil, record.detected?.discPosition != nil {
+                    Button("Group with Folder Siblings") {
+                        let siblings = library.siblingCandidates(of: record)
+                        if !siblings.isEmpty { library.group([record] + siblings) }
                     }
+                }
+                if record.setID != nil {
+                    Button("Ungroup Release Set") { library.ungroup(record) }
+                }
+                Divider()
+                Button("Remove from Queue", role: .destructive) {
+                    library.remove([record])
+                }
             }
         }
         .searchable(text: $search, placement: .sidebar, prompt: "Filter albums")
         .onDeleteCommand {
-            if let record = library.record(id: selection) {
-                library.remove([record])
-            }
+            let records = filtered.filter { library.multiSelection.contains($0.persistentModelID) }
+            if !records.isEmpty { library.remove(records) }
         }
         .overlay {
             if albums.isEmpty && !library.isScanning {

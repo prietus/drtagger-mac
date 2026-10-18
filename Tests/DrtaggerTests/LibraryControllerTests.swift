@@ -1,6 +1,7 @@
 import Foundation
 import LibraryKit
 import SwiftData
+import TagKit
 import Testing
 @testable import drtagger
 
@@ -78,6 +79,34 @@ struct LibraryControllerTests {
         try Data(count: 4).write(to: loneRoot.appending(path: "Opera - Disc 2 of 2/01.flac"))
         await controller.addRoots([loneRoot.appending(path: "Opera - Disc 2 of 2")])
         #expect(controller.members(of: lone).count == 2)
+    }
+
+    @Test func foldersTaggedWithOneReleaseBecomeASet() async throws {
+        let controller = try makeController()
+        let root = FileManager.default.temporaryDirectory.appending(path: "drtagger-tagged-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fm = FileManager.default
+        func wav() -> Data {
+            var d = Data("RIFF".utf8); var n = UInt32(36 + 400).littleEndian; d.append(Data(bytes: &n, count: 4)); d.append(Data("WAVEfmt ".utf8))
+            var fmt: [UInt8] = [16,0,0,0, 1,0, 2,0, 0x44,0xAC,0,0, 0x10,0xB1,2,0, 4,0, 16,0]; d.append(Data(fmt)); fmt.removeAll()
+            d.append(Data("data".utf8)); var m = UInt32(400).littleEndian; d.append(Data(bytes: &m, count: 4)); d.append(Data(count: 400)); return d
+        }
+        func album(_ folder: String, mbid: String) throws {
+            try fm.createDirectory(at: root.appending(path: folder), withIntermediateDirectories: true)
+            let url = root.appending(path: "\(folder)/01.wav")
+            try wav().write(to: url)
+            var t = TagSet(); t.set(TagField.mbAlbumID, mbid)
+            try TaggedFile.write(url, tags: t)
+        }
+        for n in [2, 3, 4] { try album("Piano Sonatas Vol.\(n)", mbid: "box-0001") }
+        try album("Kind of Blue", mbid: "kob-1")
+        try album("Kind of Blue copy", mbid: "kob-1")
+        await controller.addRoots([root])
+        let records = controller.allRecords()
+        let vols = records.filter { $0.displayTitle.contains("Vol") }.sorted { ($0.setPosition ?? 0) < ($1.setPosition ?? 0) }
+        #expect(vols.count == 3 && Set(vols.compactMap(\.setID)).count == 1, "same release, numbered folders: one set")
+        #expect(vols.map(\.setPosition) == [2, 3, 4])
+        #expect(records.filter { $0.displayTitle.hasPrefix("Kind of Blue") }.allSatisfy { $0.setID == nil }, "two copies are not a set")
     }
 
     @Test func addRootsStoresEveryDetectedAlbum() async throws {

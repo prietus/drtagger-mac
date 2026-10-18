@@ -3,6 +3,7 @@ import Foundation
 import LibraryKit
 import Observation
 import SwiftData
+import TagKit
 
 // Drives album discovery: takes dropped or chosen folders, runs
 // LibraryScanner off the main actor and upserts AlbumRecords into the
@@ -19,7 +20,15 @@ final class LibraryController {
     // volume that stopped responding. The blocked read cannot be cancelled;
     // the app keeps working and the result lands whenever the volume returns.
     private(set) var stalledRoots: [URL] = []
-    var selection: PersistentIdentifier?
+    var selection: PersistentIdentifier? {
+        didSet {
+            // Keep the sidebar's multiple selection in step when code selects one album.
+            if let selection, !multiSelection.contains(selection) { multiSelection = [selection] }
+        }
+    }
+    // Every album highlighted in the sidebar (⌘ / ⇧ click); the inspector
+    // shows `selection`.
+    var multiSelection: Set<PersistentIdentifier> = []
 
     var isScanning: Bool { activeScans > 0 }
     static let stallSeconds: Double = 15
@@ -96,6 +105,76 @@ final class LibraryController {
         watchdog.cancel()
         stalledRoots.removeAll { r in urls.contains(where: { $0.standardizedFileURL == r.standardizedFileURL }) }
         upsert(result)
+        await groupByTaggedRelease(result.albums.compactMap { fetch(path: $0.id) })
+    }
+
+    // MARK: Sets from the files' own tags
+
+    // Folders whose tracks name the same release and whose names differ only
+    // by a number ("Piano Sonatas Vol.2" … "Vol.8") are discs of that
+    // release. Two copies of one album (same name, no number) are not.
+    func groupByTaggedRelease(_ records: [AlbumRecord]) async {
+        let candidates = records.filter { $0.kind == .trackFolder || $0.kind == .cueMultiFile }
+        let firstFiles: [(String, URL)] = candidates.compactMap { r in
+            guard let f = r.detected?.discs.first?.trackFiles.first?.url else { return nil }
+            return (r.path, f)
+        }
+        let read: [(String, String?, Int?)] = await Task.detached(priority: .utility) {
+            firstFiles.map { path, url in
+                guard let tags = try? TaggedFile.readTags(url) else { return (path, nil, nil) }
+                let key: String? = tags.first(TagField.mbAlbumID).map { "mb:" + $0.lowercased() } ?? tags.first(TagField.discogsReleaseID).map { "discogs:" + $0 }
+                let disc = tags.first(TagField.discNumber).flatMap { Int($0.split(separator: "/").first ?? "") }
+                return (path, key, disc)
+            }
+        }.value
+        for (path, key, disc) in read {
+            guard let r = fetch(path: path) else { continue }
+            r.taggedReleaseKey = key
+            r.taggedDiscNumber = disc
+        }
+        var byRelease: [String: [AlbumRecord]] = [:]
+        for r in allRecords() where r.setID == nil {
+            if let key = r.taggedReleaseKey { byRelease[key, default: []].append(r) }
+        }
+        for (_, group) in byRelease where group.count > 1 {
+            guard let positions = Self.discPositions(group) else { continue }
+            let id = UUID().uuidString
+            let total = max(positions.values.max() ?? 0, group.count)
+            let title = Self.nameWithoutNumber(group[0].detected?.folderName ?? group[0].displayTitle)
+            for r in group {
+                r.setID = id
+                r.setPosition = positions[r.path]
+                r.setTotal = total
+                r.setTitle = title
+                if r.identificationData != nil { r.identificationData = nil; r.selectedCandidateID = nil }
+            }
+        }
+        try? context.save()
+    }
+
+    // DISCNUMBER when every folder has a distinct one; else the number in
+    // otherwise identical folder names; nil when neither tells discs apart.
+    static func discPositions(_ group: [AlbumRecord]) -> [String: Int]? {
+        let tagged = group.compactMap(\.taggedDiscNumber)
+        if tagged.count == group.count, Set(tagged).count == group.count {
+            return Dictionary(uniqueKeysWithValues: group.map { ($0.path, $0.taggedDiscNumber!) })
+        }
+        let names = group.map { $0.detected?.folderName ?? $0.displayTitle }
+        guard Set(names.map(nameWithoutNumber)).count == 1 else { return nil }
+        let numbers = names.map(lastNumber)
+        guard numbers.allSatisfy({ $0 != nil }), Set(numbers.compactMap { $0 }).count == group.count else { return nil }
+        return Dictionary(uniqueKeysWithValues: zip(group.map(\.path), numbers.compactMap { $0 }))
+    }
+
+    static func lastNumber(_ name: String) -> Int? {
+        (name.matches(of: #/(\d+)/#).last?.1).flatMap { Int($0) }
+    }
+
+    static func nameWithoutNumber(_ name: String) -> String {
+        guard let m = name.matches(of: #/(\d+)/#).last else { return name }
+        var t = name
+        t.removeSubrange(m.range)
+        return t.trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: ".-_")))
     }
 
     // Adds folders opened from another app and selects the album that was
@@ -271,11 +350,16 @@ final class LibraryController {
             return pa != pb ? pa < pb : a.displayTitle.localizedStandardCompare(b.displayTitle) == .orderedAscending
         }
         let declared = ordered.compactMap { $0.detected?.discPosition?.total }.max()
-        let total = max(declared ?? 0, ordered.compactMap { $0.detected?.discPosition?.number }.max() ?? 0, ordered.count)
-        let title = ordered.first?.detected?.setBaseName ?? ordered.first?.displayTitle ?? ""
+        // Disc numbers from the names or tags when there are no disc tokens
+        // ("Vol.1" … "Vol.9"), else the order of the names.
+        let fromNames = ordered.allSatisfy({ $0.detected?.discPosition == nil }) ? Self.discPositions(ordered) : nil
+        let positions = ordered.enumerated().map { i, r in fromNames?[r.path] ?? r.detected?.discPosition?.number ?? (i + 1) }
+        let total = max(declared ?? 0, positions.max() ?? 0, ordered.count)
+        let first = ordered.first?.detected?.folderName ?? ordered.first?.displayTitle ?? ""
+        let title = fromNames != nil ? Self.nameWithoutNumber(first) : (ordered.first?.detected?.setBaseName ?? ordered.first?.displayTitle ?? "")
         for (i, r) in ordered.enumerated() {
             r.setID = id
-            r.setPosition = r.detected?.discPosition?.number ?? (i + 1)
+            r.setPosition = positions[i]
             r.setTotal = total
             r.setTitle = title
         }

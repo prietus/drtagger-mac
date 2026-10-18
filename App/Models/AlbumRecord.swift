@@ -55,6 +55,10 @@ final class AlbumRecord {
     // Phase 8: bulk mode.
     var batchStatusRaw: String?
     var batchNote: String?
+    // The release the files already name ("mb:<id>" / "discogs:<id>") and
+    // their DISCNUMBER, read from one track at scan time.
+    var taggedReleaseKey: String?
+    var taggedDiscNumber: Int?
 
     init(detected: DetectedAlbum, issues: [ScanIssue] = [], addedAt: Date = Date()) {
         path = detected.id
