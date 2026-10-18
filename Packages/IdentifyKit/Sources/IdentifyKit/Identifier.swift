@@ -10,6 +10,9 @@ public struct IdentifierConfig: Sendable {
     public var scanArtwork = true
     public var useFingerprints = true
     public var maxDetailFetches = 12
+    // Batches over a tagged library: when the files' release ID fits them,
+    // only that release is checked (no searches, no fingerprints).
+    public var fastPathWhenTagged = false
     public var maxCandidates = 25
 
     public init(userAgent: String, acoustIDKey: String? = nil, discogsToken: String? = nil) {
@@ -128,6 +131,19 @@ public actor Identifier {
             }
         }
 
+        // The files name a release that fits them: in fast mode (batches over
+        // a tagged library) that release is checked and nothing is searched.
+        let taggedFit = order.contains { id in
+            guard origins[id]?.contains(.tagMBID) == true, let c = pool[id] else { return false }
+            let s = MatchScorer.score(c, signals: signals, origins: [.tagMBID], fingerprintVote: nil, fingerprintedTracks: 0)
+            return s.trackCountMatches == true && (s.durationFit ?? 1) >= 0.8
+        }
+        let fast = config.fastPathWhenTagged && taggedFit
+        var fingerprints: FingerprintOutcome? = nil
+        var discogsCandidates: [Candidate] = []
+        if fast {
+            log("Fast path: the release ID in the tags fits the tracks; no other release searched.")
+        } else {
         // 2. Disc ID / TOC, one lookup per local disc.
         var lookups: [(Int, String, String?)] = signals.discIDs.keys.sorted().map { ($0, signals.discIDs[$0]!, signals.tocStrings[$0]) }
         if lookups.isEmpty, let discID = signals.discID { lookups = [(1, discID, signals.tocString)] }
@@ -161,9 +177,12 @@ public actor Identifier {
             }
         }
 
-        // 4. Fingerprints.
-        var fingerprints: FingerprintOutcome? = nil
-        if config.useFingerprints, let acoustID {
+        // 4. Fingerprints. Skipped when the files' own release ID already
+        // fits them (track count and durations): a tagged library needs no
+        // audio read, which matters over the network.
+        if taggedFit, config.useFingerprints, acoustID != nil {
+            log("Fingerprints skipped: the release ID in the tags fits the tracks.")
+        } else if config.useFingerprints, let acoustID {
             progress(IdentifyProgress(fraction: 0.45, message: "Fingerprinting tracks"))
             let service = FingerprintService(tool: tool, acoustID: acoustID)
             let outcome = await service.run(tracks: signals.tracks, log: log)
@@ -239,7 +258,6 @@ public actor Identifier {
         // 7. Discogs: editions MusicBrainz lacks (many Japanese pressings).
         // Barcode / catalog hits are fetched in full and scored like any
         // other candidate; all hits also feed the credits merge.
-        var discogsCandidates: [Candidate] = []
         if let discogs {
             progress(IdentifyProgress(fraction: 0.88, message: "Searching Discogs"))
             var hits: [(Candidate, CandidateOrigin)] = []
@@ -257,6 +275,8 @@ public actor Identifier {
                 }
             }
             if !hits.isEmpty { log("Discogs: \(hits.count) hit(s) by barcode or catalog, \(fetched.count) fetched and scored.") }
+        }
+
         }
 
         // 8. Final scoring.

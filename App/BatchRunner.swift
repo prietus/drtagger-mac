@@ -2,6 +2,8 @@ import Foundation
 import IdentifyKit
 import LibraryKit
 import Observation
+import ProviderKit
+import TagKit
 
 // Where an album is in a batch. Persisted on the record so a batch resumes
 // after quitting the app.
@@ -34,6 +36,14 @@ final class BatchRunner {
 
     private(set) var isRunning = false
     private(set) var stopping = false
+    // Preview run: identify and classify every album, write nothing.
+    var dryRun: Bool {
+        get { UserDefaults.standard.bool(forKey: "batch.dryRun") }
+        set { UserDefaults.standard.set(newValue, forKey: "batch.dryRun") }
+    }
+    private(set) var startedAt: Date?
+    private(set) var finishedAtStart = 0
+    private(set) var indexing: String?
     private(set) var networkActivity: String?
     private(set) var cpuActivity: String?
     var mode: Mode {
@@ -46,19 +56,30 @@ final class BatchRunner {
     private weak var disc: DiscService?
     private weak var tagging: TagService?
     private weak var settings: AppSettings?
+    private weak var index: LibraryIndexService?
 
-    func attach(library: LibraryController, identify: IdentifyService, disc: DiscService, tagging: TagService, settings: AppSettings) {
-        self.library = library; self.identify = identify; self.disc = disc; self.tagging = tagging; self.settings = settings
+    func attach(library: LibraryController, identify: IdentifyService, disc: DiscService, tagging: TagService, settings: AppSettings, index: LibraryIndexService) {
+        self.library = library; self.identify = identify; self.disc = disc; self.tagging = tagging; self.settings = settings; self.index = index
+    }
+
+    // Albums still to go and the pace so far: an estimate of the time left.
+    func estimatedRemaining(open: Int, finished: Int) -> TimeInterval? {
+        guard isRunning, let startedAt, finished > finishedAtStart, open > 0 else { return nil }
+        let rate = Double(finished - finishedAtStart) / Date().timeIntervalSince(startedAt)
+        return rate > 0 ? Double(open) / rate : nil
     }
 
     // MARK: Control
 
     // Marks every unfinished album of the queue and starts the workers.
-    func start(mode: Mode) {
+    func start(mode: Mode, dryRun: Bool) {
         guard !isRunning, let library else { return }
         self.mode = mode
-        for r in library.allRecords() where r.batchStatus == nil || r.batchStatus == .failed {
-            if r.taggedAt != nil { continue }
+        self.dryRun = dryRun
+        // Every album not written by an earlier batch starts over (a
+        // preview run before a real one, failures, earlier reviews).
+        for r in library.allRecords() {
+            if r.taggedAt != nil, r.batchStatus == .done { continue }
             set([r], .pending, note: nil)
         }
         save()
@@ -86,7 +107,15 @@ final class BatchRunner {
     private func run() {
         isRunning = true
         stopping = false
+        startedAt = Date()
+        finishedAtStart = library.map { BatchCounts($0.allRecords()).finished } ?? 0
         Task {
+            // Duplicates are looked up in the library index.
+            if let root = settings?.libraryRootURL, let index {
+                indexing = String(localized: "Indexing the library…")
+                await index.ensure(root: root)
+                indexing = nil
+            }
             async let network: Void = networkWorker()
             async let cpu: Void = cpuWorker()
             _ = await (network, cpu)
@@ -140,7 +169,7 @@ final class BatchRunner {
 
     // SACD images are extracted before they are identified (fingerprints).
     private func extractFirst(_ r: AlbumRecord, _ members: [AlbumRecord]) -> Bool {
-        r.kind == .sacdISO && members.contains(where: Workflow.needsFiles)
+        !dryRun && mode == .importToLibrary && r.kind == .sacdISO && members.contains(where: Workflow.needsFiles)
     }
 
     private func next(where pick: (AlbumRecord, [AlbumRecord]) -> Bool) -> AlbumRecord? {
@@ -174,11 +203,16 @@ final class BatchRunner {
         let members = library.members(of: r)
         set(members, .working, note: String(localized: "Identifying"))
         networkActivity = String(localized: "Identifying \(r.displayTitle)")
-        await identify.identify(r, members: members, settings: settings)
+        await identify.identify(r, members: members, settings: settings, fastPathWhenTagged: true)
         networkActivity = nil
         if let error = identify.error(for: r) {
             set(members, .failed, note: error)
         } else if let result = r.identification, result.isConfident, TagService.chosenCandidate(r) != nil {
+            set(members, .readyToFinish, note: nil)
+        } else if let result = r.identification, let best = result.best, best.origins.contains(.tagMBID),
+                  best.trackCountMatches == true, (best.durationFit ?? 1) >= 0.8 {
+            // The release the files already name, and it fits: confirmed.
+            identify.select(best, for: r, members: members)
             set(members, .readyToFinish, note: nil)
         } else if let result = r.identification, !result.candidates.isEmpty {
             let best = result.best.map { "\($0.candidate.artist) – \($0.candidate.title) (\($0.confidence.rawValue))" } ?? ""
@@ -193,6 +227,18 @@ final class BatchRunner {
         guard let library, let disc, let tagging, let settings else { return }
         let members = library.members(of: r)
         set(members, .working, note: String(localized: "Writing tags"))
+        if dryRun, members.contains(where: Workflow.needsFiles) {
+            let what = r.kind == .sacdISO ? String(localized: "extract") : String(localized: "split")
+            set(members, .done, note: String(localized: "Would \(what) the disc and tag it as \(Self.describe(TagService.chosenCandidate(r)))"))
+            save()
+            return
+        }
+        if mode == .updateInPlace, members.contains(where: Workflow.needsFiles) {
+            // Updating in place never creates new track files in the library.
+            set(members, .review, note: String(localized: "SACD or CD image: new tracks would have to be written; use Import to extract or split it"))
+            save()
+            return
+        }
         if members.contains(where: Workflow.needsFiles) {
             cpuActivity = String(localized: "Preparing files for \(r.displayTitle)")
             guard await Workflow.produceFiles(members, disc: disc, settings: settings) else {
@@ -222,6 +268,37 @@ final class BatchRunner {
             save()
             return
         }
+        let chosen = TagService.chosenCandidate(r)
+        // Files that name another release than the one identified: never
+        // overwrite a choice someone made; show both and let them decide.
+        if !plan.alreadyTagged, let existing = Self.existingReleaseKey(plan), let chosen, existing != Self.releaseKey(chosen) {
+            cpuActivity = nil
+            set(members, .review, note: String(localized: "Tagged as another release (\(existing)); drtagger suggests \(Self.describe(chosen))"))
+            save()
+            return
+        }
+        // The same release elsewhere in the library.
+        if let chosen, let index {
+            let own = Set(plan.tracks.map { $0.url.deletingLastPathComponent().standardizedFileURL.path })
+            if let dup = index.duplicates(of: chosen, excluding: own).first {
+                cpuActivity = nil
+                set(members, .review, note: String(localized: "Already in the library: \(dup.folder)"))
+                save()
+                return
+            }
+        }
+        if dryRun {
+            cpuActivity = nil
+            let changed = plan.tracks.flatMap { $0.changedFields.map(\.name) }
+            let fields = Array(NSOrderedSet(array: changed)).compactMap { $0 as? String }
+            let note: String
+            if plan.alreadyTagged { note = String(localized: "Already tagged with this release") }
+            else if !plan.hasWork { note = String(localized: "Tags already match") }
+            else { note = String(localized: "Would write \(fields.count) field(s): \(fields.prefix(6).joined(separator: ", "))\(fields.count > 6 ? "…" : "")") + (plan.cover != nil ? String(localized: " + cover") : "") }
+            set(members, .done, note: note)
+            save()
+            return
+        }
         // Already tagged with this very release, or nothing would change:
         // leave the files alone (only move them when importing).
         if plan.alreadyTagged || !plan.hasWork {
@@ -246,11 +323,33 @@ final class BatchRunner {
             set(members, .failed, note: error)
         } else {
             set(members, .done, note: nil)
+            let folders = Set(members.flatMap { $0.tagReports.map { URL(fileURLWithPath: $0.path).deletingLastPathComponent() } })
+            await index?.update(folders: Array(folders))
         }
         save()
     }
 
     // MARK: Helpers
+
+    nonisolated static func releaseKey(_ c: Candidate) -> String {
+        c.source == .musicbrainz ? "mb:" + c.providerID.lowercased() : c.source == .discogs ? "discogs:" + c.providerID : c.id
+    }
+
+    // The release the files already name, if they agree on one.
+    static func existingReleaseKey(_ plan: TagPlan) -> String? {
+        let keys = plan.tracks.map { t -> String? in
+            if let mb = t.existing.first(TagField.mbAlbumID), !mb.isEmpty { return "mb:" + mb.lowercased() }
+            if let d = t.existing.first(TagField.discogsReleaseID), !d.isEmpty { return "discogs:" + d }
+            return nil
+        }
+        guard let first = keys.first ?? nil, keys.allSatisfy({ $0 == first }) else { return nil }
+        return first
+    }
+
+    nonisolated static func describe(_ c: Candidate?) -> String {
+        guard let c else { return "?" }
+        return "\(c.artist) – \(c.title)" + " (" + [c.year, c.country, c.catalogNumber].compactMap { $0 }.joined(separator: ", ") + ")"
+    }
 
     private func set(_ records: [AlbumRecord], _ status: BatchStatus, note: String?) {
         for r in records { r.batchStatus = status; r.batchNote = note }

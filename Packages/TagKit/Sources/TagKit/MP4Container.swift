@@ -76,7 +76,7 @@ enum MP4Container {
 
     // MARK: Read
 
-    static func read(url: URL) throws -> ContainerContents {
+    static func read(url: URL, withDigest: Bool = true) throws -> ContainerContents {
         let source = try FileHandleDataSource(url: url)
         let loc = try locate(source)
         var tags = TagSet()
@@ -127,7 +127,7 @@ enum MP4Container {
                 }
             }
         }
-        let digest = try audioDigest(source, loc.top)
+        let digest = withDigest ? try audioDigest(source, loc.top) : ""
         return ContainerContents(tags: tags, pictures: pictures, rawMetadata: raw, audioDigest: digest, opaque: opaque)
     }
 

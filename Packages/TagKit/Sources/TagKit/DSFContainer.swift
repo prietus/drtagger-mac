@@ -5,7 +5,7 @@ import Foundation
 // DSF: ID3v2 trailer referenced from the DSD chunk's metadata pointer.
 enum DSFContainer {
 
-    static func read(url: URL) throws -> ContainerContents {
+    static func read(url: URL, withDigest: Bool = true) throws -> ContainerContents {
         let source = try FileHandleDataSource(url: url)
         let file = try DSFFile(source: source)
         let parsed = file.id3Tag.map(ID3Mapper.parse) ?? ID3Mapper.Parsed(tags: TagSet(), pictures: [], preserved: [])
@@ -14,7 +14,7 @@ enum DSFContainer {
         if file.id3Offset > 0, file.id3Offset < total {
             raw = try source.read(at: file.id3Offset, length: Int(total - file.id3Offset))
         }
-        let digest = try AudioCopier.digest(of: source, offset: file.dataChunkOffset + 12, length: file.audioByteCount)
+        let digest = withDigest ? try AudioCopier.digest(of: source, offset: file.dataChunkOffset + 12, length: file.audioByteCount) : ""
         return ContainerContents(tags: parsed.tags, pictures: parsed.pictures, rawMetadata: raw, audioDigest: digest, preserved: parsed.preserved)
     }
 

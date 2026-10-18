@@ -348,3 +348,33 @@ enum Fixtures {
         #expect(again.isEmpty)
     }
 }
+
+@Suite("Library index") struct LibraryIndexTests {
+    @Test func indexesOneTrackPerFolderAndFindsDuplicates() throws {
+        let dir = try Fixtures.tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        func album(_ name: String, mbid: String?, discogs: String? = nil, barcode: String? = nil, cat: String? = nil) throws {
+            let folder = dir.appending(path: name)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let url = folder.appending(path: "01.wav")
+            try Fixtures.wav().write(to: url)
+            var t = TagSet(); t.set(TagField.album, name); t.set(TagField.mbAlbumID, mbid); t.set(TagField.discogsReleaseID, discogs)
+            t.set(TagField.barcode, barcode); t.set(TagField.catalogNumber, cat)
+            try TaggedFile.write(url, tags: t)
+        }
+        try album("A", mbid: "AAAA-1")
+        try album("A copy", mbid: "aaaa-1")
+        try album("B", mbid: nil, discogs: "27786006", barcode: "4988031573259", cat: "POCS-1950")
+        try album("C", mbid: nil, barcode: "4988031573259", cat: "POCS 1950")
+        let index = LibraryIndexer.scan(root: dir)
+        #expect(index.count == 4)
+        #expect(try TaggedFile.readTags(dir.appending(path: "A/01.wav")).first(TagField.mbAlbumID) == "AAAA-1")
+        let a = dir.appending(path: "A").standardizedFileURL.path
+        let dupA = LibraryIndexer.duplicates(in: index, releaseKey: "mb:aaaa-1", barcode: nil, catalogNumbers: [], excluding: [a])
+        #expect(dupA.map { URL(fileURLWithPath: $0.folder).lastPathComponent } == ["A copy"])
+        let dupB = LibraryIndexer.duplicates(in: index, releaseKey: "discogs:27786006", barcode: "4988031573259", catalogNumbers: ["POCS-1950"], excluding: [])
+        #expect(Set(dupB.map { URL(fileURLWithPath: $0.folder).lastPathComponent }) == ["B", "C"], "C matches by barcode and catalog")
+        // Unchanged folders are reused without reading.
+        let again = LibraryIndexer.scan(root: dir, previous: index)
+        #expect(again == index)
+    }
+}

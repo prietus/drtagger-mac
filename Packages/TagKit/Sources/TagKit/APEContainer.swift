@@ -62,7 +62,7 @@ enum APEContainer {
         return Layout(items: items, tagStart: tagStart, audioLength: tagStart, raw: raw)
     }
 
-    static func read(url: URL) throws -> ContainerContents {
+    static func read(url: URL, withDigest: Bool = true) throws -> ContainerContents {
         let source = try FileHandleDataSource(url: url)
         let l = try layout(source)
         var tags = TagSet()
@@ -93,7 +93,7 @@ enum APEContainer {
         }
         if let t = trackTotal { tags.set(TagField.trackTotal, t); tags.set(TagField.totalTracks, t) }
         if let d = discTotal { tags.set(TagField.discTotal, d); tags.set(TagField.totalDiscs, d) }
-        let digest = try AudioCopier.digest(of: source, offset: 0, length: l.audioLength)
+        let digest = withDigest ? try AudioCopier.digest(of: source, offset: 0, length: l.audioLength) : ""
         return ContainerContents(tags: tags, pictures: pictures, rawMetadata: l.raw, audioDigest: digest, opaque: opaque)
     }
 

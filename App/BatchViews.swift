@@ -1,3 +1,6 @@
+import AppKit
+import ProviderKit
+import UniformTypeIdentifiers
 import SwiftUI
 
 // Which albums the sidebar shows while a batch exists.
@@ -41,6 +44,7 @@ struct BatchStartSheet: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
     @State private var mode: BatchRunner.Mode = .importToLibrary
+    @State private var dryRun = true
 
     private var candidates: [AlbumRecord] {
         library.allRecords().filter { library.isLeader($0) && $0.taggedAt == nil && $0.batchStatus != .done && $0.batchStatus != .review }
@@ -68,12 +72,15 @@ struct BatchStartSheet: View {
             .font(.callout)
             Text("SACD images and CD images always get their tracks written to the library folder. Originals are backed up, and every album can be restored afterwards.")
                 .font(.caption).foregroundStyle(.secondary)
+            Toggle("Preview run: identify and report what would change, write nothing", isOn: $dryRun)
+            Text("Albums whose files name a different release than the one found, and releases already elsewhere in the library, are always set aside for you.")
+                .font(.caption).foregroundStyle(.secondary)
             HStack {
                 Text("\(candidates.count) album(s) to process").font(.callout)
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Start") {
-                    batch.start(mode: mode)
+                Button(dryRun ? "Start Preview" : "Start") {
+                    batch.start(mode: mode, dryRun: dryRun)
                     dismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -83,7 +90,7 @@ struct BatchStartSheet: View {
         }
         .padding(22)
         .frame(width: 560)
-        .onAppear { mode = batch.mode }
+        .onAppear { mode = batch.mode; dryRun = batch.dryRun || batch.startedAt == nil }
     }
 }
 
@@ -112,7 +119,13 @@ struct BatchStatusLine: View {
                         .help("Forget the batch statuses; the albums stay in the queue")
                 }
             }
-            if let a = batch.networkActivity ?? batch.cpuActivity {
+            HStack(spacing: 6) {
+                if batch.dryRun { Text("Preview").bold().foregroundStyle(.orange) }
+                if let eta = batch.estimatedRemaining(open: counts.open, finished: counts.finished) {
+                    Text("About \(Duration.seconds(eta).formatted(.units(allowed: [.hours, .minutes], width: .abbreviated))) left").foregroundStyle(.tertiary)
+                }
+            }
+            if let a = batch.indexing ?? batch.networkActivity ?? batch.cpuActivity {
                 Text(a).lineLimit(1).truncationMode(.middle).foregroundStyle(.tertiary)
             }
         }
@@ -156,5 +169,159 @@ struct BatchReviewBanner: View {
 
     private func selectNext() {
         if let next = nextRecord { library.selection = next.persistentModelID }
+    }
+}
+
+
+// The batch at a glance: one row per album, sortable, with the release
+// chosen, the confidence and what happened. Double-click opens the album.
+struct BatchTableView: View {
+    @Environment(LibraryController.self) private var library
+    @Environment(BatchRunner.self) private var batch
+    let onOpen: (AlbumRecord) -> Void
+    @State private var filter: BatchFilter = .all
+    @State private var selection = Set<String>()
+    @State private var sortOrder = [KeyPathComparator(\BatchRow.order)]
+
+    var body: some View {
+        let all = rows
+        let counts = BatchCounts(library.allRecords())
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Text(batch.dryRun ? "Batch preview" : "Batch").font(.title3).bold()
+                ProgressView(value: Double(counts.finished), total: Double(max(1, counts.total))).frame(maxWidth: 200)
+                Text("\(counts.finished) of \(counts.total)").monospacedDigit().foregroundStyle(.secondary)
+                Spacer()
+                Picker("Show", selection: $filter) {
+                    Text("All").tag(BatchFilter.all)
+                    Text("Review \(counts.review)").tag(BatchFilter.review)
+                    Text("Errors \(counts.failed)").tag(BatchFilter.failed)
+                    Text("Done \(counts.done)").tag(BatchFilter.done)
+                }
+                .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 360)
+                Button("Export Report…") { exportReport(all) }
+            }
+            Table(all.filter { $0.matches(filter) }.sorted(using: sortOrder), selection: $selection, sortOrder: $sortOrder) {
+                TableColumn("Status", value: \BatchRow.statusText) { row in
+                    Label(row.statusText, systemImage: row.icon).foregroundStyle(row.color)
+                }
+                .width(min: 90, ideal: 110)
+                TableColumn("Album", value: \BatchRow.album) { row in
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(row.album).lineLimit(1)
+                        Text(row.artist).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                .width(min: 180, ideal: 260)
+                TableColumn("Release", value: \BatchRow.release) { row in
+                    Text(row.release).lineLimit(2).foregroundStyle(.secondary)
+                }
+                .width(min: 160, ideal: 260)
+                TableColumn("Match", value: \BatchRow.confidence) { row in Text(row.confidence) }
+                    .width(min: 60, ideal: 80)
+                TableColumn("Note", value: \BatchRow.note) { row in
+                    Text(row.note).lineLimit(2).foregroundStyle(.secondary).help(row.note)
+                }
+            }
+            .contextMenu(forSelectionType: String.self) { ids in
+                if let id = ids.first, let record = library.fetch(path: id) {
+                    Button("Open Album") { onOpen(record) }
+                }
+            } primaryAction: { ids in
+                if let id = ids.first, let record = library.fetch(path: id) { onOpen(record) }
+            }
+        }
+        .padding(18)
+    }
+
+    private var rows: [BatchRow] {
+        library.allRecords().sorted(by: BatchRunner.queueOrder).enumerated().compactMap { i, r in
+            r.batchStatus == nil ? nil : BatchRow(record: r, order: i)
+        }
+    }
+
+    private func exportReport(_ rows: [BatchRow]) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "drtagger batch \(Date().formatted(.iso8601.year().month().day())).csv"
+        panel.allowedContentTypes = [.commaSeparatedText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        func q(_ s: String) -> String { "\"" + s.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
+        var csv = "status,artist,album,path,release,release_id,match,note\n"
+        for r in rows {
+            csv += [r.statusText, r.artist, r.album, r.id, r.release, r.releaseID, r.confidence, r.note].map(q).joined(separator: ",") + "\n"
+        }
+        try? csv.write(to: url, atomically: true, encoding: .utf8)
+    }
+}
+
+// A snapshot of one album for the table: plain values, so the table can
+// sort by key paths.
+struct BatchRow: Identifiable, Sendable {
+    enum Kind: Sendable { case done, review, failed, working, pending }
+    let id: String
+    let order: Int
+    let album: String
+    let artist: String
+    let release: String
+    let releaseID: String
+    let confidence: String
+    let note: String
+    let kind: Kind
+
+    @MainActor
+    init(record r: AlbumRecord, order: Int) {
+        id = r.path
+        self.order = order
+        album = r.displayTitle
+        artist = r.artistHint ?? ""
+        let c = TagService.chosenCandidate(r)
+        release = c.map(BatchRunner.describe) ?? ""
+        releaseID = c.map(BatchRunner.releaseKey) ?? ""
+        confidence = r.identification?.best?.confidence.rawValue ?? ""
+        note = r.batchNote ?? ""
+        switch r.batchStatus {
+        case .done: kind = .done
+        case .review: kind = .review
+        case .failed: kind = .failed
+        case .working: kind = .working
+        default: kind = .pending
+        }
+    }
+
+    var statusText: String {
+        switch kind {
+        case .done: return String(localized: "Done")
+        case .review: return String(localized: "Review")
+        case .failed: return String(localized: "Error")
+        case .working: return String(localized: "Working")
+        case .pending: return String(localized: "Pending")
+        }
+    }
+    var icon: String {
+        switch kind {
+        case .done: return "checkmark.circle.fill"
+        case .review: return "questionmark.circle.fill"
+        case .failed: return "exclamationmark.triangle.fill"
+        case .working: return "gearshape.fill"
+        case .pending: return "circle"
+        }
+    }
+    var color: Color {
+        switch kind {
+        case .done: return .green
+        case .review: return .orange
+        case .failed: return .red
+        case .working: return .accentColor
+        case .pending: return .secondary
+        }
+    }
+
+    func matches(_ filter: BatchFilter) -> Bool {
+        switch filter {
+        case .all: return true
+        case .review: return kind == .review
+        case .failed: return kind == .failed
+        case .done: return kind == .done
+        }
     }
 }

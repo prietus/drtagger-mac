@@ -8,17 +8,17 @@ enum FLACContainer {
 
     static let vendor = "drtagger for Mac"
 
-    static func read(url: URL) throws -> ContainerContents {
+    static func read(url: URL, withDigest: Bool = true) throws -> ContainerContents {
         let source = try FileHandleDataSource(url: url)
         let file = try FLACFile(source: source)
         var tags = TagSet()
         for (name, value) in file.vorbisComment?.fields ?? [] { tags.add(name, value) }
         var pictures: [Picture] = []
-        for block in file.blocks where block.type == .picture {
+        for block in file.blocks where block.type == .picture && withDigest {
             if let p = parsePictureBlock(try block.loadPayload(from: source)) { pictures.append(p) }
         }
         let raw = try source.read(at: 4, length: Int(file.audioFrameOffset - 4))
-        let digest = try AudioCopier.digest(of: source, offset: file.audioFrameOffset, length: file.audioFrameLength)
+        let digest = withDigest ? try AudioCopier.digest(of: source, offset: file.audioFrameOffset, length: file.audioFrameLength) : ""
         return ContainerContents(tags: tags, pictures: pictures, rawMetadata: raw, audioDigest: digest)
     }
 

@@ -42,7 +42,7 @@ struct IFFContainer {
         return list
     }
 
-    func read(url: URL) throws -> ContainerContents {
+    func read(url: URL, withDigest: Bool = true) throws -> ContainerContents {
         let source = try FileHandleDataSource(url: url)
         let list = try chunks(source)
         var parsed = ID3Mapper.Parsed(tags: TagSet(), pictures: [], preserved: [])
@@ -51,7 +51,7 @@ struct IFFContainer {
             raw = try source.read(at: tag.payloadOffset, length: Int(tag.size))
             if let (t, _) = try? ID3v2Tag.parse(raw) { parsed = ID3Mapper.parse(t) }
         }
-        let digest = try audioDigest(source, list)
+        let digest = withDigest ? try audioDigest(source, list) : ""
         return ContainerContents(tags: parsed.tags, pictures: parsed.pictures, rawMetadata: raw, audioDigest: digest, preserved: parsed.preserved)
     }
 

@@ -62,6 +62,20 @@ public enum TaggedFile {
         }
     }
 
+    // Tags only: no audio is read (no digest, no picture payloads), so it is
+    // cheap enough for indexing a whole library over the network.
+    public static func readTags(_ url: URL) throws -> TagSet {
+        switch try container(for: url) {
+        case .flac: return try FLACContainer.read(url: url, withDigest: false).tags
+        case .dsf: return try DSFContainer.read(url: url, withDigest: false).tags
+        case .wav: return try IFFContainer(flavor: .wav).read(url: url, withDigest: false).tags
+        case .aiff: return try IFFContainer(flavor: .aiff).read(url: url, withDigest: false).tags
+        case .dff: return try IFFContainer(flavor: .dff).read(url: url, withDigest: false).tags
+        case .ape: return try APEContainer.read(url: url, withDigest: false).tags
+        case .mp4: return try MP4Container.read(url: url, withDigest: false).tags
+        }
+    }
+
     public static func backup(_ url: URL) throws -> TagBackup {
         TagBackup(url: url, container: try container(for: url), contents: try read(url))
     }

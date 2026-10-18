@@ -27,7 +27,7 @@ final class IdentifyService {
     func activity(for record: AlbumRecord) -> Activity? { activity[record.path] }
     func error(for record: AlbumRecord) -> String? { errors[record.path] }
 
-    func identify(_ record: AlbumRecord, members: [AlbumRecord] = [], settings: AppSettings) async {
+    func identify(_ record: AlbumRecord, members: [AlbumRecord] = [], settings: AppSettings, fastPathWhenTagged: Bool = false) async {
         let members = members.isEmpty ? [record] : members
         guard !isBusy(record), let album = record.detected else { return }
         guard let location = settings.ffmpegLocator.locate(), let probe = location.ffprobe else {
@@ -46,6 +46,7 @@ final class IdentifyService {
         let discogsToken = Self.launchArgument("--discogs-token") ?? (settings.isDiscogsConfigured ? settings.discogsToken.trimmed : nil)
         var config = IdentifierConfig(userAgent: Self.userAgent, acoustIDKey: acoustIDKey, discogsToken: discogsToken)
         config.scanArtwork = true
+        config.fastPathWhenTagged = fastPathWhenTagged
         let identifier = Identifier(config: config, tool: FFmpegTool(ffmpeg: location.ffmpeg, ffprobe: probe))
         let toc = record.toc
         let ctdb = record.ctdbReport?.metadata ?? []

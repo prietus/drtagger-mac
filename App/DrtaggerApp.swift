@@ -13,6 +13,7 @@ struct DrtaggerApp: App {
     @State private var cddb = CDDBServer()
     @State private var releaseImages = ReleaseImagesService()
     @State private var batch = BatchRunner()
+    @State private var libraryIndex = LibraryIndexService()
 
     init() {
         // Paths after `--add` are ours: without this AppKit also turns them
@@ -43,6 +44,7 @@ struct DrtaggerApp: App {
                 .environment(cddb)
                 .environment(releaseImages)
                 .environment(batch)
+                .environment(libraryIndex)
                 .task { cddb.update(enabled: settings.cddbServerEnabled, port: settings.cddbPort) }
                 .onChange(of: settings.cddbServerEnabled) { _, on in cddb.update(enabled: on, port: settings.cddbPort) }
                 .onChange(of: settings.cddbPort) { _, port in cddb.update(enabled: settings.cddbServerEnabled, port: port) }
@@ -50,7 +52,7 @@ struct DrtaggerApp: App {
                 // instead of spawning a new one.
                 .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
                 .onAppear {
-                    batch.attach(library: library, identify: identify, disc: disc, tagging: tagging, settings: settings)
+                    batch.attach(library: library, identify: identify, disc: disc, tagging: tagging, settings: settings, index: libraryIndex)
                     appDelegate.openHandler = { urls in
                         NSApp.activate()
                         Task { await library.open(urls) }

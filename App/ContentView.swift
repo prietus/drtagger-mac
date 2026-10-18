@@ -13,6 +13,7 @@ struct ContentView: View {
     @Environment(AppSettings.self) private var settings
     @State private var confirmClear = false
     @State private var startingBatch = false
+    @State private var showBatchTable = false
     @Environment(BatchRunner.self) private var batch
 
     var body: some View {
@@ -21,7 +22,12 @@ struct ContentView: View {
             QueueSidebar(selection: $library.selection)
                 .navigationSplitViewColumnWidth(min: 280, ideal: 340, max: 520)
         } detail: {
-            if let record = library.record(id: library.selection) {
+            if showBatchTable, BatchCounts(library.allRecords()).total > 0 {
+                BatchTableView { record in
+                    library.selection = record.persistentModelID
+                    showBatchTable = false
+                }
+            } else if let record = library.record(id: library.selection) {
                 AlbumInspectorView(record: record)
                     .id(record.persistentModelID)
             } else {
@@ -64,6 +70,12 @@ struct ContentView: View {
                 .disabled(library.selection == nil || library.isScanning)
                 .help("Remove the selected album from the queue")
 
+                if BatchCounts(library.allRecords()).total > 0 {
+                    Toggle(isOn: $showBatchTable) {
+                        Label("Batch Overview", systemImage: "tablecells")
+                    }
+                    .help("Every album of the batch in a table, with the release chosen and what happened")
+                }
                 if batch.isRunning {
                     Button {
                         batch.stop()
@@ -75,6 +87,7 @@ struct ContentView: View {
                 } else {
                     Button {
                         startingBatch = true
+                        showBatchTable = true
                     } label: {
                         Label("Process Queue…", systemImage: "bolt.circle")
                     }
@@ -192,7 +205,7 @@ extension ContentView {
     func batchFromLaunchArguments(_ arguments: [String] = CommandLine.arguments) async {
         guard let i = arguments.firstIndex(of: "--batch") else { return }
         let mode: BatchRunner.Mode = (i + 1 < arguments.count && arguments[i + 1] == "update") ? .updateInPlace : .importToLibrary
-        batch.start(mode: mode)
+        batch.start(mode: mode, dryRun: arguments.contains("--dry-run"))
         while batch.isRunning { try? await Task.sleep(for: .milliseconds(500)) }
         for r in library.allRecords().sorted(by: BatchRunner.queueOrder) {
             let status = r.batchStatus?.rawValue ?? "none"
