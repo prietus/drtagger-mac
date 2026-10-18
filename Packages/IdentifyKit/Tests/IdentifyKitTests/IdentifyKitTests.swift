@@ -329,6 +329,38 @@ struct MatchScorerTests {
                 "durations still count when not every track is proven")
     }
 
+    @Test func aCDIsNeverTheSourceOfDSDFiles() {
+        let c = Self.candidate(tracks: [200, 180, 240], catno: "W2-25110")
+        var s = Self.signals(durations: [200, 180, 240], catno: "W2-25110")
+        s.isDSD = true
+        let all = ReleaseVote(releaseID: c.providerID, trackIndices: [0, 1, 2], bestScore: 0.9)
+        let scored = MatchScorer.score(c, signals: s, origins: [.fingerprint], fingerprintVote: all, fingerprintedTracks: 3)
+        #expect(scored.confidence == .possible)
+    }
+
+    @Test func oneCatalogNumberEnteredTwiceIsNoRival() {
+        // Led Zeppelin II, WPCR-13131: MusicBrainz lists the 2005 and 2008 pressings.
+        let a = Self.candidate(tracks: [300, 300], catno: "WPCR-13131"), b = Self.candidate(tracks: [300, 300], catno: "WPCR 13131")
+        #expect(MatchScorer.areTwins(a, b))
+        #expect(!MatchScorer.areTwins(a, Self.candidate(tracks: [300, 300], catno: "AMCY-4006")))
+    }
+
+    @Test func theAlbumsCoverBreaksATieBetweenProvenEditions() {
+        var signals = AlbumSignals()
+        signals.tracks = (0..<8).map { LocalTrack(index: $0, discNumber: 1, title: nil, durationSeconds: 300, url: nil) }
+        func scored(_ id: String, _ catno: String) -> ScoredCandidate {
+            ScoredCandidate(candidate: Candidate(source: .musicbrainz, providerID: id, title: "Burn", artist: "Deep Purple", catalogNumber: catno),
+                            score: 90, confidence: .likely, reasons: [], origins: [.fingerprint], durationFit: 1,
+                            trackCountMatches: true, fingerprintCoverage: 1, formatCompatibility: nil)
+        }
+        let result = IdentificationResult(signals: signals, fingerprints: FingerprintOutcome(fingerprintedTracks: 8, tracksWithHits: 8, votes: [], recordingIDs: [:]),
+                                          candidates: [scored("jp", "WPCR-13115"), scored("uk", "CDP 7 92611 2")], discogsCandidates: [], log: [], startedAt: Date(), elapsedSeconds: 0)
+        let (jp, uk) = (result.candidates[0].id, result.candidates[1].id)
+        #expect(result.coverTieBreak(distances: [jp: 0.9, uk: 0.2])?.id == uk)
+        #expect(result.coverTieBreak(distances: [jp: 0.2, uk: 0.5]) == nil, "both covers look alike")
+        #expect(result.coverTieBreak(distances: [:]) == nil, "no images")
+    }
+
     @Test func printedWordsAreNotCatalogs() {
         let found = CatalogNumberParser.extract(from: ["EUROPE-2006", "MADE IN JAPAN 2006", "WPZR-30194", "RECORDED IN 1969",
                                                        "HOLLYWOOD, CA 90068", "FOR 1954", "THIS 2011"]).map(\.formatted)

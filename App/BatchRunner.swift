@@ -244,6 +244,13 @@ final class BatchRunner {
         } else if let result = r.identification, result.isClearFingerprintMatch, let best = result.best {
             identify.select(best, for: r, members: members)
             set(members, .readyToFinish, note: nil)
+        } else if let result = r.identification, let pick = await coverTieBreak(result, r, members: members, settings: settings) {
+            identify.select(pick, for: r, members: members)
+            set(members, .readyToFinish, note: nil)
+        } else if let result = r.identification, result.signals.localFormat == .sacd,
+                  !result.candidates.contains(where: { MatchScorer.isSACDEdition($0.candidate) }),
+                  result.best?.formatCompatibility != .fits {
+            set(members, .review, note: String(localized: "DSD files, but no SACD edition is known; the candidates are CDs"))
         } else if let result = r.identification, !result.candidates.isEmpty {
             let best = result.best.map { "\($0.candidate.artist) – \($0.candidate.title) (\($0.confidence.rawValue))" } ?? ""
             set(members, .review, note: String(localized: "No sure match; best: \(best)"))
@@ -251,6 +258,19 @@ final class BatchRunner {
             set(members, .review, note: String(localized: "No release found"))
         }
         save()
+    }
+
+    // Editions tied on proven audio: the album's own cover decides when it
+    // looks like one of them only.
+    private func coverTieBreak(_ result: IdentificationResult, _ r: AlbumRecord, members: [AlbumRecord], settings: AppSettings) async -> ScoredCandidate? {
+        let contenders = result.coverContenders
+        guard !contenders.isEmpty, let local = await TagService.localCover(r, members: members) else { return nil }
+        let check = CoverCheck(userAgent: IdentifyService.userAgent, discogsToken: settings.isDiscogsConfigured ? settings.discogsToken.trimmed : nil)
+        var distances: [String: Float] = [:]
+        for c in contenders {
+            distances[c.id] = await check.distance(local: local, candidate: c.candidate)
+        }
+        return result.coverTieBreak(distances: distances)
     }
 
     private func finishStep(_ r: AlbumRecord) async {

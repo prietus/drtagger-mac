@@ -26,7 +26,7 @@ public actor DiscogsClient {
 
     // MARK: Search
 
-    public func searchReleases(artist: String, album: String, limit: Int = 25) async throws -> [Candidate] {
+    public func searchReleases(artist: String, album: String, format: String? = nil, limit: Int = 25) async throws -> [Candidate] {
         let trimmedArtist = artist.trimmingCharacters(in: .whitespaces)
         let trimmedAlbum = album.trimmingCharacters(in: .whitespaces)
         guard !trimmedArtist.isEmpty || !trimmedAlbum.isEmpty else { return [] }
@@ -41,6 +41,9 @@ public actor DiscogsClient {
         }
         if !trimmedAlbum.isEmpty {
             items.append(URLQueryItem(name: "release_title", value: trimmedAlbum))
+        }
+        if let format {
+            items.append(URLQueryItem(name: "format", value: format))
         }
         components.queryItems = items
         guard let url = components.url else { return [] }

@@ -251,6 +251,16 @@ final class TagService {
         plans[path] = plan
     }
 
+    // The album's own cover: the first file's embedded front, else the
+    // folder image.
+    static func localCover(_ record: AlbumRecord, members: [AlbumRecord]) async -> Data? {
+        let first = targetFiles(record, members: members).targets.first?.url
+        let detected = record.detected
+        return await Task.detached {
+            first.flatMap { try? TaggedFile.readForPreview($0) }?.pictures.first { $0.kind == .front }?.data ?? folderCover(detected)
+        }.value
+    }
+
     // folder.jpg / cover.jpg / front.jpg next to the tracks.
     nonisolated static func folderCover(_ album: DetectedAlbum?) -> Data? {
         guard let album else { return nil }

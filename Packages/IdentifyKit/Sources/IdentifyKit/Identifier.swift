@@ -42,14 +42,15 @@ public struct IdentificationResult: Sendable, Codable, Hashable {
         return true
     }
 
-    // The best candidate's closest rival. The same pressing listed on
-    // MusicBrainz and on Discogs (one barcode) is not a rival.
+    // The best candidate's closest rival. The same pressing entered twice
+    // (one barcode or catalog number) is not a rival.
     public var runnerUp: ScoredCandidate? {
         guard let best else { return nil }
-        return candidates.dropFirst().first { c in
-            !(c.candidate.source != best.candidate.source && c.candidate.barcode != nil
-              && c.candidate.barcode.map { b in best.candidate.barcode.map { MatchScorer.barcodesEqual($0, b) } ?? false } == true)
-        }
+        return rival(of: best)
+    }
+
+    func rival(of pick: ScoredCandidate) -> ScoredCandidate? {
+        candidates.first { $0.id != pick.id && !MatchScorer.areTwins($0.candidate, pick.candidate) }
     }
 
     // Fingerprints alone, but unmistakable: every track matches, the track
@@ -61,6 +62,39 @@ public struct IdentificationResult: Sendable, Codable, Hashable {
               best.trackCountMatches == true,
               (best.durationFit ?? 0) >= 0.75, !MatchScorer.contradictsLocalCodes(best.candidate, signals: signals) else { return false }
         return best.score - (runnerUp?.score ?? 0) >= 30
+    }
+
+    // Editions whose audio is proven on every track but that tie on the
+    // rest: the cover the album already has can still tell them apart.
+    public var coverContenders: [ScoredCandidate] {
+        guard let best, (fingerprints?.fingerprintedTracks ?? 0) == signals.trackCount, signals.trackCount > 0 else { return [] }
+        let close = candidates.filter { best.score - $0.score < 30 }
+        guard close.contains(where: { Self.provesAudio($0, signals: signals) }), close.count > 1 else { return [] }
+        return Array(close.prefix(6))
+    }
+
+    // Points for a cover that looks like the album's own (Vision distance).
+    public static func coverPoints(_ distance: Float?) -> Double {
+        guard let d = distance else { return 0 }
+        return d < 0.35 ? 30 : d < 0.6 ? 15 : 0
+    }
+
+    // The contender that, with the cover's points added, stands 30 points
+    // clear of every other edition; nil when the covers do not decide.
+    public func coverTieBreak(distances: [String: Float]) -> ScoredCandidate? {
+        let contenders = coverContenders
+        guard !contenders.isEmpty else { return nil }
+        func total(_ c: ScoredCandidate) -> Double { c.score + Self.coverPoints(distances[c.id]) }
+        guard let pick = contenders.max(by: { total($0) < total($1) }), Self.provesAudio(pick, signals: signals) else { return nil }
+        let rivals = candidates.filter { $0.id != pick.id && !MatchScorer.areTwins($0.candidate, pick.candidate) }
+        let rivalBest = rivals.map { contenders.contains($0) ? total($0) : $0.score }.max() ?? 0
+        return total(pick) - rivalBest >= 30 ? pick : nil
+    }
+
+    static func provesAudio(_ c: ScoredCandidate, signals: AlbumSignals) -> Bool {
+        (c.fingerprintCoverage ?? 0) >= 0.999 && c.trackCountMatches == true && (c.durationFit ?? 0) >= 0.75
+            && c.confidence >= .likely
+            && !MatchScorer.contradictsLocalCodes(c.candidate, signals: signals)
     }
 }
 
@@ -300,6 +334,21 @@ public actor Identifier {
                 }
             }
             if !hits.isEmpty { log("Discogs: \(hits.count) hit(s) by barcode or catalog, \(fetched.count) fetched and scored.") }
+            // DSD files come from a SACD (or a DSD download): when MusicBrainz
+            // only knows the CDs, look for the SACD editions on Discogs.
+            if signals.localFormat == .sacd, !order.contains(where: { MatchScorer.isSACDEdition(pool[$0]!) }),
+               let title = signals.folderAlbumHint ?? signals.albumHint, !title.isEmpty {
+                let rs = (try? await discogs.searchReleases(artist: signals.artistHint ?? "", album: title, format: "SACD", limit: 10)) ?? []
+                var added = 0
+                for hit in rs where added < 3 && fetched.insert(hit.providerID).inserted {
+                    if let full = try? await discogs.releaseDetail(id: hit.providerID) {
+                        discogsCandidates.append(full)
+                        add(full, .textSearch)
+                        added += 1
+                    }
+                }
+                log("Discogs SACD search \"\(title)\": \(rs.count) release(s), \(added) fetched and scored.")
+            }
         }
 
         }

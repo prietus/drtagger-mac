@@ -89,6 +89,7 @@ public enum MatchScorer {
         let missingDiscs = media.isEmpty ? [] : signals.presentDiscs.filter { $0 > media.count }
 
         // Format plausibility.
+        var plainCDForDSD = false
         let formatText = (media.compactMap(\.format) + [candidate.mediaFormat ?? ""]).joined(separator: " ").lowercased()
         let isSACD = formatText.contains("sacd") || formatText.contains("dsd")
         let isVinyl = formatText.contains("vinyl") || formatText.contains("cassette") || formatText.contains("shellac") || formatText.contains("reel")
@@ -96,6 +97,7 @@ public enum MatchScorer {
         switch signals.localFormat {
         case .sacd:
             if isSACD { score += 15; reasons.append("SACD edition") }
+            else if isCD { score -= 20; plainCDForDSD = true; reasons.append("A CD cannot be the source of DSD files") }
             else if isVinyl || formatText.contains("digital") || formatText.contains("dvd") || formatText.contains("blu-ray") { score -= 20; reasons.append("Not a SACD (\(candidate.mediaFormat ?? "unknown format"))") }
             else if !formatText.isEmpty { score -= 5 }
         case .cd:
@@ -252,8 +254,8 @@ public enum MatchScorer {
         let audioProven = (coverage ?? 0) >= 0.999 && fingerprintedTracks == signals.tracks.count && trackCountMatches == true
         let fitOK = audioProven || (durationFit == nil ? (trackCountMatches ?? true) : durationFit! >= 0.6)
         let confidence: MatchConfidence
-        if strong >= 2 && fitOK && (trackCountMatches ?? true) { confidence = .confident }
-        else if strong >= 1 && fitOK && (trackCountMatches ?? true) { confidence = .likely }
+        if strong >= 2 && fitOK && (trackCountMatches ?? true) && !plainCDForDSD { confidence = .confident }
+        else if strong >= 1 && fitOK && (trackCountMatches ?? true) && !plainCDForDSD { confidence = .likely }
         else if score >= 20 { confidence = .possible }
         else { confidence = .unlikely }
 
@@ -357,6 +359,21 @@ public enum MatchScorer {
         return normalize(edition).split(separator: " ").map(String.init).filter { !generic.contains($0) }.map { w in
             w.hasSuffix("ed") && w.count > 5 ? String(w.dropLast(2)) : w
         }
+    }
+
+    public static func isSACDEdition(_ c: Candidate) -> Bool {
+        let text = (c.media.compactMap(\.format) + [c.mediaFormat ?? ""] + c.formatDescriptions).joined(separator: " ").lowercased()
+        return text.contains("sacd") || text.contains("dsd")
+    }
+
+    // One pressing entered twice (MusicBrainz and Discogs, or two
+    // MusicBrainz entries): same barcode or catalog number, same medium.
+    public static func areTwins(_ a: Candidate, _ b: Candidate) -> Bool {
+        guard isSACDEdition(a) == isSACDEdition(b) else { return false }
+        if let x = a.barcode, let y = b.barcode, barcodesEqual(x, y) { return true }
+        let ca = Set(a.catalogNumbers.map(CatalogNumberParser.normalize).filter { !$0.isEmpty })
+        let cb = Set(b.catalogNumbers.map(CatalogNumberParser.normalize).filter { !$0.isEmpty })
+        return !ca.isDisjoint(with: cb)
     }
 
     static func barcodesEqual(_ a: String, _ b: String) -> Bool {
