@@ -299,6 +299,19 @@ public actor Identifier {
             }
         }
 
+        // DSD files come from a SACD (or a DSD download). When none of the
+        // editions found is one, ask for SACDs by the name MusicBrainz gives
+        // the album (folder names are often too messy to search); the
+        // artist stays the files' own, a performer more often than not.
+        let canonical = order.first { origins[$0]?.contains(.fingerprint) == true }.flatMap { pool[$0] }
+        let sacdQuery = (artist: signals.artistHint ?? canonical?.artist ?? "", title: canonical?.title ?? signals.folderAlbumHint ?? signals.albumHint ?? "")
+        let needsSACD = { signals.localFormat == .sacd && !sacdQuery.title.isEmpty && !order.contains { MatchScorer.isSACDEdition(pool[$0]!) } }
+        if needsSACD() {
+            let rs = (try? await musicBrainz.searchReleases(artist: sacdQuery.artist, album: sacdQuery.title, format: "SACD", limit: 10)) ?? []
+            for r in rs { add(r, .textSearch) }
+            log("SACD search \"\(sacdQuery.title)\": \(rs.count) release(s).")
+        }
+
         // 6. Details for candidates that arrived without tracks, best first.
         progress(IdentifyProgress(fraction: 0.8, message: "Fetching release details"))
         var detailFetches = 0
@@ -334,11 +347,10 @@ public actor Identifier {
                 }
             }
             if !hits.isEmpty { log("Discogs: \(hits.count) hit(s) by barcode or catalog, \(fetched.count) fetched and scored.") }
-            // DSD files come from a SACD (or a DSD download): when MusicBrainz
-            // only knows the CDs, look for the SACD editions on Discogs.
-            if signals.localFormat == .sacd, !order.contains(where: { MatchScorer.isSACDEdition(pool[$0]!) }),
-               let title = signals.folderAlbumHint ?? signals.albumHint, !title.isEmpty {
-                let rs = (try? await discogs.searchReleases(artist: signals.artistHint ?? "", album: title, format: "SACD", limit: 10)) ?? []
+            // Still no SACD edition: Discogs knows many MusicBrainz lacks.
+            if needsSACD() {
+                let title = sacdQuery.title
+                let rs = (try? await discogs.searchReleases(artist: sacdQuery.artist, album: title, format: "SACD", limit: 10)) ?? []
                 var added = 0
                 for hit in rs where added < 3 && fetched.insert(hit.providerID).inserted {
                     if let full = try? await discogs.releaseDetail(id: hit.providerID) {

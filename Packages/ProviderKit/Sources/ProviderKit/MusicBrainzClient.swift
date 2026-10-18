@@ -94,7 +94,7 @@ public actor MusicBrainzClient {
 
     // MARK: Search
 
-    public func searchReleases(artist: String, album: String, limit: Int = 10) async throws -> [Candidate] {
+    public func searchReleases(artist: String, album: String, format: String? = nil, limit: Int = 10) async throws -> [Candidate] {
         let trimmedArtist = artist.trimmingCharacters(in: .whitespaces)
         let trimmedAlbum = album.trimmingCharacters(in: .whitespaces)
         guard !trimmedArtist.isEmpty || !trimmedAlbum.isEmpty else { return [] }
@@ -108,6 +108,9 @@ public actor MusicBrainzClient {
         }
         if !trimmedAlbum.isEmpty {
             parts.append("release:\"\(escape(trimmedAlbum))\"")
+        }
+        if let format {
+            parts.append("format:\"\(escape(format))\"")
         }
         let query = parts.joined(separator: " AND ")
 
