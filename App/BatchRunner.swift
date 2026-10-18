@@ -331,8 +331,9 @@ final class BatchRunner {
             save()
             return
         }
-        // The same release elsewhere in the library.
-        if let chosen, let index {
+        // The same release elsewhere in the library (not for an album tagged
+        // without an edition: a CD rip of it is another pressing).
+        if let chosen, let index, !r.albumOnly {
             let own = Set(plan.tracks.map { $0.url.deletingLastPathComponent().standardizedFileURL.path })
             if let dup = index.duplicates(of: chosen, excluding: own).first {
                 cpuActivity = nil
