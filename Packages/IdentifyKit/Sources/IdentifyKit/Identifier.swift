@@ -36,7 +36,13 @@ public struct IdentificationResult: Sendable, Codable, Hashable {
         guard let best else { return false }
         guard best.confidence == .confident else { return false }
         // A confident pick must stand clear of the runner-up.
-        if let second = candidates.dropFirst().first, second.confidence == .confident, second.score >= best.score - 5 {
+        // The same pressing listed on MusicBrainz and on Discogs (one
+        // barcode) is not a rival.
+        let rival = candidates.dropFirst().first { c in
+            !(c.candidate.source != best.candidate.source && c.candidate.barcode != nil
+              && c.candidate.barcode.map { b in best.candidate.barcode.map { MatchScorer.barcodesEqual($0, b) } ?? false } == true)
+        }
+        if let second = rival, second.confidence == .confident, second.score >= best.score - 5 {
             return false
         }
         return true

@@ -298,7 +298,8 @@ struct MatchScorerTests {
     }
 
     @Test func printedWordsAreNotCatalogs() {
-        let found = CatalogNumberParser.extract(from: ["EUROPE-2006", "MADE IN JAPAN 2006", "WPZR-30194"]).map(\.formatted)
+        let found = CatalogNumberParser.extract(from: ["EUROPE-2006", "MADE IN JAPAN 2006", "WPZR-30194", "RECORDED IN 1969",
+                                                       "HOLLYWOOD, CA 90068", "FOR 1954", "THIS 2011"]).map(\.formatted)
         #expect(found == ["WPZR-30194"])
     }
 

@@ -168,6 +168,14 @@ public enum CatalogNumberParser {
         // Printed on sleeves next to years: "EUROPE 2006", "MADE IN JAPAN".
         "EUROPE", "JAPAN", "GERMANY", "HOLLAND", "FRANCE", "ITALY", "SPAIN", "ENGLAND", "USA", "UK", "EU", "MADE", "PRINTED",
         "MANUFACTURED", "DISTRIBUTED", "RECORDED", "MIXED", "MASTERED", "COPYRIGHT", "LIVE", "TOUR", "STUDIO", "RECORDS", "MUSIC",
+        // Running text: "RECORDED IN 1969", "FOR 1954", "THIS 2011".
+        "IN", "FOR", "THIS", "THE", "AND", "OF", "ON", "AT", "BY", "TO", "FROM", "WITH", "SINCE", "YEAR", "ALL", "RIGHTS", "RESERVED",
+    ]
+    // US state + ZIP in label addresses: "Los Angeles, CA 90068".
+    private static let usStates: Set<String> = [
+        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA",
+        "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN",
+        "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
     ]
 
     public static func extract(from lines: [String]) -> [CatalogNumber] {
@@ -182,7 +190,7 @@ public enum CatalogNumberParser {
                           let p = Range(match.range(at: 1), in: cleaned),
                           let n = Range(match.range(at: 2), in: cleaned) else { continue }
                     let prefix = String(cleaned[p]), number = String(cleaned[n])
-                    guard !stopWords.contains(prefix) else { continue }
+                    guard !stopWords.contains(prefix), !(usStates.contains(prefix) && number.count == 5) else { continue }
                     let cat = CatalogNumber(prefix: prefix, number: number)
                     if seen.insert(cat.formatted).inserted { results.append(cat) }
                 }
