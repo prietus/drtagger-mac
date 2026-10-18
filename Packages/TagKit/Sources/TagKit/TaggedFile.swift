@@ -69,13 +69,28 @@ public enum TaggedFile {
     public static func readTags(_ url: URL) throws -> TagSet {
         let url = url.onDisk
         switch try container(for: url) {
-        case .flac: return try FLACContainer.read(url: url, withDigest: false).tags
+        case .flac: return try FLACContainer.read(url: url, withDigest: false, withPictures: false).tags
         case .dsf: return try DSFContainer.read(url: url, withDigest: false).tags
         case .wav: return try IFFContainer(flavor: .wav).read(url: url, withDigest: false).tags
         case .aiff: return try IFFContainer(flavor: .aiff).read(url: url, withDigest: false).tags
         case .dff: return try IFFContainer(flavor: .dff).read(url: url, withDigest: false).tags
         case .ape: return try APEContainer.read(url: url, withDigest: false).tags
         case .mp4: return try MP4Container.read(url: url, withDigest: false).tags
+        }
+    }
+
+    // Tags and pictures without hashing the audio: enough to preview what
+    // a write would change (the write itself verifies the audio).
+    public static func readForPreview(_ url: URL) throws -> ContainerContents {
+        let url = url.onDisk
+        switch try container(for: url) {
+        case .flac: return try FLACContainer.read(url: url, withDigest: false)
+        case .dsf: return try DSFContainer.read(url: url, withDigest: false)
+        case .wav: return try IFFContainer(flavor: .wav).read(url: url, withDigest: false)
+        case .aiff: return try IFFContainer(flavor: .aiff).read(url: url, withDigest: false)
+        case .dff: return try IFFContainer(flavor: .dff).read(url: url, withDigest: false)
+        case .ape: return try APEContainer.read(url: url, withDigest: false)
+        case .mp4: return try MP4Container.read(url: url, withDigest: false)
         }
     }
 

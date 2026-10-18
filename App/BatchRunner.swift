@@ -267,7 +267,7 @@ final class BatchRunner {
         // album): wait for it and use it rather than giving up.
         while tagging.isBusy(r) { try? await Task.sleep(for: .milliseconds(200)) }
         if tagging.plan(for: r)?.candidateID != TagService.chosenCandidate(r)?.id {
-            await tagging.buildPlan(r, members: members, settings: settings)
+            await tagging.buildPlan(r, members: members, settings: settings, lookUpArtworkWhenCovered: false)
         }
         guard let plan = tagging.plan(for: r) else {
             cpuActivity = nil

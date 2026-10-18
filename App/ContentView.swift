@@ -251,9 +251,12 @@ struct QueueSidebar: View {
                         Button("Show in Finder") {
                             NSWorkspace.shared.activateFileViewerSelecting([record.url])
                         }
-                        let siblings = library.siblingCandidates(of: record)
-                        if record.setID == nil, !siblings.isEmpty {
-                            Button("Group with \(siblings.count) Folder Sibling(s)") { library.group([record] + siblings) }
+                        // Siblings are looked up when chosen, not for every row on every redraw.
+                        if record.setID == nil, record.detected?.discPosition != nil {
+                            Button("Group with Folder Siblings") {
+                                let siblings = library.siblingCandidates(of: record)
+                                if !siblings.isEmpty { library.group([record] + siblings) }
+                            }
                         }
                         if record.setID != nil {
                             Button("Ungroup Release Set") { library.ungroup(record) }

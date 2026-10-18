@@ -116,7 +116,7 @@ final class TagService {
         return (out.map { (url: $0.0, disc: $0.1, track: $0.2, owner: $0.3) }, nil)
     }
 
-    func buildPlan(_ record: AlbumRecord, members: [AlbumRecord] = [], settings: AppSettings) async {
+    func buildPlan(_ record: AlbumRecord, members: [AlbumRecord] = [], settings: AppSettings, lookUpArtworkWhenCovered: Bool = true) async {
         let members = members.isEmpty ? [record] : members
         let leader = members.first ?? record
         for m in members { leaders[m.path] = leader.path }
@@ -186,7 +186,7 @@ final class TagService {
         }
 
         let reads: [(URL, Int, Int, String, Result<ContainerContents, any Error>)] = await Task.detached {
-            targets.map { t in (t.url, t.disc, t.track, t.owner, Result { try TaggedFile.read(t.url) }) }
+            targets.map { t in (t.url, t.disc, t.track, t.owner, Result { try TaggedFile.readForPreview(t.url) }) }
         }.value
         var tracks: [TrackPlan] = []
         var index = 0
@@ -218,7 +218,9 @@ final class TagService {
             activity[path] = Activity(message: String(localized: "Looking for artwork…"), fraction: nil)
             let logBox = LogBox()
             let fetcher = CoverArtFetcher(userAgent: IdentifyService.userAgent, fanartKey: settings.isFanartConfigured ? settings.fanartKey.trimmed : nil)
-            let options = await fetcher.options(for: candidate, discogs: context.discogs, album: leader.detected) { logBox.append($0) }
+            // Batches leave a cover the files already have alone and do not
+            // ask four services for alternatives nobody will look at.
+            let options = (keepCover && !lookUpArtworkWhenCovered) ? [] : await fetcher.options(for: candidate, discogs: context.discogs, album: leader.detected) { logBox.append($0) }
             plan.artworkOptions = options
             let preferred = leader.coverOptionID.flatMap { id in options.first { $0.id == id } }
             if keepCover { logBox.append("Artwork: the files already have a front cover; it is kept unless you choose another.") }

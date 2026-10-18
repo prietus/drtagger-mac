@@ -97,9 +97,17 @@ final class AlbumRecord {
 
     var url: URL { URL(fileURLWithPath: path).onDisk }
 
+    // Decoded once per change of the stored JSON: the sidebar, the batch
+    // and the table read these for hundreds of albums on every redraw.
+    @Transient private var detectedCache: (data: Data, value: DetectedAlbum?)? = nil
+    @Transient private var identificationCache: (data: Data, value: IdentificationResult?)? = nil
+
     var detected: DetectedAlbum? {
         guard let detailsData else { return nil }
-        return (try? JSONDecoder().decode(DetectedAlbum.self, from: detailsData))?.onDisk()
+        if let c = detectedCache, c.data == detailsData { return c.value }
+        let value = (try? JSONDecoder().decode(DetectedAlbum.self, from: detailsData))?.onDisk()
+        detectedCache = (detailsData, value)
+        return value
     }
 
     var issues: [ScanIssue] {
@@ -144,8 +152,18 @@ final class AlbumRecord {
     var discPosition: Int { setPosition ?? detected?.discPosition?.number ?? 1 }
 
     var identification: IdentificationResult? {
-        get { identificationData.flatMap { try? JSONDecoder().decode(IdentificationResult.self, from: $0) } }
-        set { identificationData = newValue.flatMap { try? JSONEncoder().encode($0) }; updatedAt = Date() }
+        get {
+            guard let data = identificationData else { return nil }
+            if let c = identificationCache, c.data == data { return c.value }
+            let value = try? JSONDecoder().decode(IdentificationResult.self, from: data)
+            identificationCache = (data, value)
+            return value
+        }
+        set {
+            identificationData = newValue.flatMap { try? JSONEncoder().encode($0) }
+            identificationCache = identificationData.map { ($0, newValue) }
+            updatedAt = Date()
+        }
     }
 
     var selectedCandidate: ScoredCandidate? {
