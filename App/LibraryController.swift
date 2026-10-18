@@ -396,7 +396,9 @@ final class LibraryController {
         return context.model(for: id) as? AlbumRecord
     }
 
-    var hasUnfinishedBatch: Bool { allRecords().contains { $0.batchStatus?.isOpen == true } }
+    // A batch whose report has not been closed (Close Batch): its albums,
+    // reviews and notes stay in the queue across launches.
+    var hasBatch: Bool { allRecords().contains { $0.batchStatus != nil } }
 
     // Albums a batch was working on when the app quit start that step again.
     func resetInterruptedBatch() {

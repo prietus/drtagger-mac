@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import LibraryKit
 
 // Drives the ffmpeg / ffprobe executables for decoding and encoding.
 // Every call spawns one process; stdin feeding (for encoding a byte range)
@@ -276,7 +277,7 @@ enum ProcessLauncher {
     static func run(_ executable: URL, arguments: [String], stdin feeder: StdinFeeder? = nil) async throws -> Result {
         let process = Process()
         process.executableURL = executable
-        process.arguments = arguments
+        process.arguments = arguments.map(ProcessPaths.argument)
 
         let outPipe = Pipe()
         let errPipe = Pipe()

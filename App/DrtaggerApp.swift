@@ -24,8 +24,9 @@ struct DrtaggerApp: App {
         let container = Self.makeContainer()
         self.container = container
         let library = LibraryController(container: container)
-        if library.hasUnfinishedBatch {
-            // A batch was interrupted: keep its albums to resume it.
+        if library.hasBatch {
+            // A batch was interrupted, or its report is still open: keep
+            // its albums to resume it or review them.
             library.resetInterruptedBatch()
         } else if !UserDefaults.standard.bool(forKey: "queue.keepBetweenLaunches") {
             library.removeAll()
@@ -90,6 +91,10 @@ struct DrtaggerApp: App {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appending(path: "drtagger", directoryHint: .isDirectory)
         try? FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)
+        // Unit tests run inside the app: never on the user's queue.
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            return try! ModelContainer(for: schema, configurations: [ModelConfiguration("Tests", schema: schema, isStoredInMemoryOnly: true)])
+        }
         let storeURL = support.appending(path: "Library.store", directoryHint: .notDirectory)
         let onDisk = ModelConfiguration("Library", schema: schema, url: storeURL)
         if let container = try? ModelContainer(for: schema, configurations: [onDisk]) {
