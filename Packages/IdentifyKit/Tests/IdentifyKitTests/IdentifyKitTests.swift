@@ -269,6 +269,20 @@ struct MatchScorerTests {
         #expect(MatchScorer.score(box, signals: whole, origins: [.textSearch], fingerprintVote: nil, fingerprintedTracks: 0).trackCountMatches == true)
     }
 
+    // Live check against Cover Art Archive: COVERCHECK_IMAGE=<the box cover>.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["COVERCHECK_IMAGE"] != nil))
+    func coverOfAnotherEditionIsReported() async throws {
+        let local = try Data(contentsOf: URL(fileURLWithPath: ProcessInfo.processInfo.environment["COVERCHECK_IMAGE"]!))
+        let check = CoverCheck(userAgent: "drtagger-tests/0.1 (prietus@live.com)", discogsToken: nil)
+        let single = Candidate(source: .musicbrainz, providerID: "757fed12-3193-4bfb-9f82-5abd962fe769", title: "Vol. 1", artist: "Brautigam")
+        let box = Candidate(source: .musicbrainz, providerID: "a4ec848c-d59a-4496-81df-1e1df94d8b91", title: "The Complete Sonatas", artist: "Brautigam")
+        let d1 = try #require(await check.distance(local: local, candidate: single))
+        let d2 = try #require(await check.distance(local: local, candidate: box))
+        print("single \(d1) box \(d2)")
+        #expect(d1 >= CoverCheck.differentThreshold)
+        #expect(d2 < 0.3)
+    }
+
     @Test func printedWordsAreNotCatalogs() {
         let found = CatalogNumberParser.extract(from: ["EUROPE-2006", "MADE IN JAPAN 2006", "WPZR-30194"]).map(\.formatted)
         #expect(found == ["WPZR-30194"])

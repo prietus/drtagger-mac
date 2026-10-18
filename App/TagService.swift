@@ -70,6 +70,7 @@ final class TagService {
     private(set) var plans: [String: TagPlan] = [:]
     private var leaders: [String: String] = [:]     // member path → plan key (the set's first record)
     private var detailCache: [String: Candidate] = [:] // candidate id → release with its tracklist
+    private var coverDistances: [String: Float] = [:]  // album path + candidate id → cover distance (-1: no image)
 
     private func key(_ record: AlbumRecord) -> String { leaders[record.path] ?? record.path }
     func isBusy(_ record: AlbumRecord) -> Bool { activity[key(record)] != nil }
@@ -190,11 +191,13 @@ final class TagService {
         }.value
         var tracks: [TrackPlan] = []
         var index = 0
+        var localCover: Data?
         for (url, disc, track, owner, read) in reads {
             switch read {
             case .failure(let error):
                 warnings.append("\(url.lastPathComponent): \(error.localizedDescription)")
             case .success(let contents):
+                if localCover == nil { localCover = contents.pictures.first { $0.kind == .front }?.data }
                 guard let proposed = PicardMapper.trackTags(candidate, media: media, disc: disc, track: track, context: context) else {
                     continue
                 }
@@ -234,7 +237,28 @@ final class TagService {
             }
             plan.log = logBox.lines
         }
+        if let local = localCover ?? Self.folderCover(leader.detected) {
+            let checkKey = path + "\u{1}" + candidate.id
+            if coverDistances[checkKey] == nil {
+                activity[path] = Activity(message: String(localized: "Comparing covers…"), fraction: nil)
+                let check = CoverCheck(userAgent: IdentifyService.userAgent, discogsToken: settings.isDiscogsConfigured ? settings.discogsToken.trimmed : nil)
+                coverDistances[checkKey] = await check.distance(local: local, candidate: candidate) ?? -1
+            }
+            if let d = coverDistances[checkKey], d >= CoverCheck.differentThreshold {
+                plan.warnings.append(String(localized: "The album's cover does not look like this release's: check that it is the same edition."))
+            }
+        }
         plans[path] = plan
+    }
+
+    // folder.jpg / cover.jpg / front.jpg next to the tracks.
+    nonisolated static func folderCover(_ album: DetectedAlbum?) -> Data? {
+        guard let album else { return nil }
+        let names = ["folder", "cover", "front"]
+        let file = album.artworkFiles.first { url in
+            names.contains(url.deletingPathExtension().lastPathComponent.lowercased()) && url.deletingLastPathComponent().path == album.url.path
+        }
+        return file.flatMap { try? Data(contentsOf: $0) }
     }
 
     // nil keeps the files' own pictures.

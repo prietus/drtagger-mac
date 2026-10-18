@@ -203,6 +203,11 @@ extension ContentView {
     // `--batch import|update` runs the batch over the queue and prints a
     // summary line per album on stderr when it ends.
     func batchFromLaunchArguments(_ arguments: [String] = CommandLine.arguments) async {
+        // `--rescan` reads the library folder again first (new folders,
+        // release sets from the files' tags).
+        if arguments.contains("--rescan"), let root = settings.libraryRootURL {
+            await library.addRoots([root])
+        }
         if arguments.contains("--resume") {
             batch.resume()
         } else {
