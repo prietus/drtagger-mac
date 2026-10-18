@@ -317,6 +317,18 @@ struct MatchScorerTests {
         #expect(result([scored("a", 115, barcode: "724383608829")], coded).isClearFingerprintMatch == false, "the scanned barcode is another edition's")
     }
 
+    @Test func fingerprintsOutweighReleaseDurations() {
+        // Led Zeppelin III, WPCR-13132: MusicBrainz lists every track a few
+        // seconds shorter than the rip.
+        let c = Self.candidate(tracks: [144, 233, 206, 443, 241, 292, 189, 337, 257, 220], barcode: nil, catno: "WPCR-13132")
+        let s = Self.signals(durations: [147.1, 236.4, 211.6, 445.2, 248.6, 298.3, 192.4, 339.2, 258.3, 222.6], catno: "WPCR-13132")
+        let all = ReleaseVote(releaseID: c.providerID, trackIndices: Array(0..<10), bestScore: 0.9)
+        #expect(MatchScorer.score(c, signals: s, origins: [.fingerprint], fingerprintVote: all, fingerprintedTracks: 10).confidence == .confident)
+        let some = ReleaseVote(releaseID: c.providerID, trackIndices: Array(0..<8), bestScore: 0.9)
+        #expect(MatchScorer.score(c, signals: s, origins: [.fingerprint], fingerprintVote: some, fingerprintedTracks: 10).confidence == .possible,
+                "durations still count when not every track is proven")
+    }
+
     @Test func printedWordsAreNotCatalogs() {
         let found = CatalogNumberParser.extract(from: ["EUROPE-2006", "MADE IN JAPAN 2006", "WPZR-30194", "RECORDED IN 1969",
                                                        "HOLLYWOOD, CA 90068", "FOR 1954", "THIS 2011"]).map(\.formatted)

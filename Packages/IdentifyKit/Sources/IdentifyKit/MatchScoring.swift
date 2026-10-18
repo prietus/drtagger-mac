@@ -246,7 +246,11 @@ public enum MatchScorer {
         if let c = signals.countryHint, let cc = candidate.country, c == cc { score += 6; reasons.append("Country \(c) matches") }
         if candidate.status == "Bootleg" { score -= 10 }
 
-        let fitOK = durationFit == nil ? (trackCountMatches ?? true) : durationFit! >= 0.6
+        // Every track's fingerprint already proves the audio; release
+        // durations are often off by a few seconds (SACD gaps, sleeve
+        // timings), so they only veto when the audio is not proven.
+        let audioProven = (coverage ?? 0) >= 0.999 && fingerprintedTracks == signals.tracks.count && trackCountMatches == true
+        let fitOK = audioProven || (durationFit == nil ? (trackCountMatches ?? true) : durationFit! >= 0.6)
         let confidence: MatchConfidence
         if strong >= 2 && fitOK && (trackCountMatches ?? true) { confidence = .confident }
         else if strong >= 1 && fitOK && (trackCountMatches ?? true) { confidence = .likely }
