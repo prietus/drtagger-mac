@@ -18,6 +18,7 @@ struct AlbumInspectorView: View {
             VStack(alignment: .leading, spacing: 20) {
                 header
                 if let detected {
+                    BatchReviewBanner(record: record)
                     WorkflowView(record: record)
                     ReleaseSetView(record: record)
                     // SACD images are extracted before they are identified.

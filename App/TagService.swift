@@ -28,6 +28,9 @@ struct TrackPlan: Identifiable, Sendable, Equatable {
 
 struct TagPlan: Sendable, Equatable {
     var candidateID: String
+    // Every file already carries this release's ID (MusicBrainz or Discogs):
+    // the album was tagged with it before, there is nothing to decide.
+    var alreadyTagged = false
     var tracks: [TrackPlan]
     var artworkOptions: [ArtworkOption]
     var coverOptionID: String?           // nil: keep the pictures the files have
@@ -207,6 +210,10 @@ final class TagService {
         }
 
         var plan = TagPlan(candidateID: candidate.id, tracks: tracks, artworkOptions: [], coverOptionID: nil, cover: nil, warnings: warnings, log: [])
+        let idField = candidate.source == .musicbrainz ? TagField.mbAlbumID : TagField.discogsReleaseID
+        plan.alreadyTagged = !tracks.isEmpty && tracks.allSatisfy { $0.existing.first(idField)?.lowercased() == candidate.providerID.lowercased() }
+        // Files that already have a front cover keep it unless one is chosen.
+        let keepCover = leader.coverOptionID == nil && tracks.allSatisfy { $0.existingPictures.contains { $0.kind == .front } }
         if settings.embedFrontCover {
             activity[path] = Activity(message: String(localized: "Looking for artwork…"), fraction: nil)
             let logBox = LogBox()
@@ -214,7 +221,8 @@ final class TagService {
             let options = await fetcher.options(for: candidate, discogs: context.discogs, album: leader.detected) { logBox.append($0) }
             plan.artworkOptions = options
             let preferred = leader.coverOptionID.flatMap { id in options.first { $0.id == id } }
-            for option in ([preferred].compactMap { $0 } + options) {
+            if keepCover { logBox.append("Artwork: the files already have a front cover; it is kept unless you choose another.") }
+            for option in keepCover ? [] : ([preferred].compactMap { $0 } + options) {
                 if let art = await fetcher.fetch(option) {
                     plan.cover = art
                     plan.coverOptionID = option.id
@@ -260,7 +268,7 @@ final class TagService {
         try? record.modelContext?.save()
     }
 
-    func apply(_ record: AlbumRecord, members: [AlbumRecord] = [], settings: AppSettings) async {
+    func apply(_ record: AlbumRecord, members: [AlbumRecord] = [], settings: AppSettings, organize: Bool? = nil) async {
         let members = members.isEmpty ? [record] : members
         let leader = members.first ?? record
         let path = key(record)
@@ -329,7 +337,7 @@ final class TagService {
         var reports = outcome.reports
 
         // 2. Library layout from the final tags.
-        if settings.organizeAfterApply, let root = settings.libraryRootURL, outcome.problems.isEmpty, !reports.isEmpty {
+        if organize ?? settings.organizeAfterApply, let root = settings.libraryRootURL, outcome.problems.isEmpty, !reports.isEmpty {
             var options = LibraryOrganizer.Options()
             options.albumFolderTemplate = settings.albumFolderTemplate
             options.trackFileTemplate = settings.trackFileTemplate
@@ -368,6 +376,8 @@ final class TagService {
             m.tagReports = reportsByOwner[m.path] ?? []
             m.taggedAt = Date()
             m.coverOptionID = plan.coverOptionID
+            // Resolved by hand from the review inbox.
+            if problems.isEmpty, m.batchStatus == .review { m.batchStatus = .done; m.batchNote = nil }
             if problems.isEmpty {
                 m.state = .done
                 m.errorMessage = nil
@@ -380,6 +390,41 @@ final class TagService {
         plans[path] = nil
         activity[path] = nil
         try? record.modelContext?.save()
+    }
+
+    // Moves an album into the library layout using the tags it already has,
+    // without writing anything into the files.
+    func organizeOnly(_ record: AlbumRecord, members: [AlbumRecord] = [], settings: AppSettings) async -> String? {
+        let members = members.isEmpty ? [record] : members
+        guard let root = settings.libraryRootURL, let plan = plans[key(record)] else { return nil }
+        var options = LibraryOrganizer.Options()
+        options.albumFolderTemplate = settings.albumFolderTemplate
+        options.trackFileTemplate = settings.trackFileTemplate
+        options.asciiFileNames = settings.asciiFileNames
+        let planned = LibraryOrganizer.plan(files: plan.tracks.map { (url: $0.url, tags: $0.existing) }, root: root, options: options)
+        guard !planned.isEmpty else { return nil }
+        let ownerOf = Dictionary(plan.tracks.map { ($0.url.path, $0.owner) }, uniquingKeysWith: { a, _ in a })
+        do {
+            let moved = try await Task.detached { try LibraryOrganizer.perform(planned) }.value
+            var map: [String: String] = [:]
+            for m in moved { map[m.from.path] = m.to.path }
+            for m in members {
+                var moves = m.fileMoves
+                for (from, to) in map where ownerOf[from] == m.path || ownerOf[from] == nil { moves[from] = to }
+                m.fileMoves = moves
+                m.tagBackups = m.tagBackups.map { b in map[b.path].map { b.moved(to: $0) } ?? b }
+                m.tagReports = m.tagReports.map { r in map[r.path].map { r.moved(to: $0) } ?? r }
+                if m.kind == .trackFolder || m.kind == .cueMultiFile {
+                    let folders = Set(plan.tracks.filter { $0.owner == m.path }.compactMap { map[$0.url.path] }.map { URL(fileURLWithPath: $0).deletingLastPathComponent().path })
+                    if folders.count == 1, let folder = folders.first { m.path = folder }
+                }
+            }
+            plans[key(record)] = nil
+            try? record.modelContext?.save()
+            return nil
+        } catch {
+            return String(localized: "Could not move files into the library: \(error.localizedDescription)")
+        }
     }
 
     func restore(_ record: AlbumRecord, members: [AlbumRecord] = []) async {

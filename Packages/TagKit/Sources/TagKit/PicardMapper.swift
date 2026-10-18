@@ -48,6 +48,8 @@ public enum PicardMapper {
         if c.source == .musicbrainz {
             t.set(TagField.mbAlbumID, c.providerID)
             t.set(TagField.mbReleaseGroupID, c.releaseGroupID)
+        } else if c.source == .discogs {
+            t.set(TagField.discogsReleaseID, c.providerID)
         }
         t.set(TagField.mbDiscID, context.musicBrainzDiscID)
         t.set(TagField.discID, context.freedbDiscID)

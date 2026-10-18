@@ -52,6 +52,9 @@ final class AlbumRecord {
     var setPosition: Int?
     var setTotal: Int?
     var setTitle: String?
+    // Phase 8: bulk mode.
+    var batchStatusRaw: String?
+    var batchNote: String?
 
     init(detected: DetectedAlbum, issues: [ScanIssue] = [], addedAt: Date = Date()) {
         path = detected.id
@@ -148,6 +151,11 @@ final class AlbumRecord {
     var selectedCandidate: ScoredCandidate? {
         guard let id = selectedCandidateID else { return nil }
         return identification?.candidates.first { $0.id == id }
+    }
+
+    var batchStatus: BatchStatus? {
+        get { batchStatusRaw.flatMap(BatchStatus.init(rawValue:)) }
+        set { batchStatusRaw = newValue?.rawValue }
     }
 
     var fileMoves: [String: String] {

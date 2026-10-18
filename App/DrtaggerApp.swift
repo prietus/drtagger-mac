@@ -12,6 +12,7 @@ struct DrtaggerApp: App {
     @State private var tagging = TagService()
     @State private var cddb = CDDBServer()
     @State private var releaseImages = ReleaseImagesService()
+    @State private var batch = BatchRunner()
 
     init() {
         // Paths after `--add` are ours: without this AppKit also turns them
@@ -22,7 +23,10 @@ struct DrtaggerApp: App {
         let container = Self.makeContainer()
         self.container = container
         let library = LibraryController(container: container)
-        if !UserDefaults.standard.bool(forKey: "queue.keepBetweenLaunches") {
+        if library.hasUnfinishedBatch {
+            // A batch was interrupted: keep its albums to resume it.
+            library.resetInterruptedBatch()
+        } else if !UserDefaults.standard.bool(forKey: "queue.keepBetweenLaunches") {
             library.removeAll()
         }
         _library = State(initialValue: library)
@@ -38,6 +42,7 @@ struct DrtaggerApp: App {
                 .environment(tagging)
                 .environment(cddb)
                 .environment(releaseImages)
+                .environment(batch)
                 .task { cddb.update(enabled: settings.cddbServerEnabled, port: settings.cddbPort) }
                 .onChange(of: settings.cddbServerEnabled) { _, on in cddb.update(enabled: on, port: settings.cddbPort) }
                 .onChange(of: settings.cddbPort) { _, port in cddb.update(enabled: settings.cddbServerEnabled, port: port) }
@@ -45,6 +50,7 @@ struct DrtaggerApp: App {
                 // instead of spawning a new one.
                 .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
                 .onAppear {
+                    batch.attach(library: library, identify: identify, disc: disc, tagging: tagging, settings: settings)
                     appDelegate.openHandler = { urls in
                         NSApp.activate()
                         Task { await library.open(urls) }

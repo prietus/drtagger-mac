@@ -194,6 +194,9 @@ struct WorkflowView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("\(c.artist) – \(c.title)").bold().lineLimit(1)
                 Text([c.year, c.country, c.mediaFormat, c.catalogNumber].compactMap { $0 }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                if plan?.alreadyTagged == true {
+                    Label("Already tagged with this release", systemImage: "checkmark.seal").font(.caption).foregroundStyle(.green)
+                }
             }
         }
     }
@@ -253,6 +256,8 @@ struct WorkflowView: View {
     }
 
     private func autoPreview() {
+        // The batch prepares its own previews.
+        guard record.batchStatus?.isOpen != true else { return }
         guard !running, chosen, !filesNeeded, plan == nil, !applied, !busy else { return }
         Task { await tagging.buildPlan(record, members: members, settings: settings) }
     }

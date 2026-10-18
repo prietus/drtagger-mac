@@ -362,6 +362,31 @@ format and catalog number; EXTD carries label, catalog, barcode and MBID.
 `CDDBServer` (app) serves it with Network.framework on 127.0.0.1, off by
 default, port 8880.
 
+8. Bulk mode (beets-style), planned 2026-10-18. Decisions (Carlos): one
+   batch mode with two destinations, "Import to library" (organise and move)
+   or "Update in place" (tags only, files stay), metadata backups either way;
+   albums without a confident match, duplicates and errors are set aside
+   for review without stopping the batch; sized for hundreds to thousands
+   of albums; duplicates (same MusicBrainz / Discogs ID, else catalog and
+   barcode, already in the library) are flagged and set aside.
+   Delivered in parts, each usable on its own:
+   - **8a — batch runner and review inbox** on the current queue. Two
+     workers: network (identification, one album at a time so the shared
+     rate limits hold) and CPU (SACD extraction / image splitting, tag
+     writing with ReplayGain). SACD images extract before identifying;
+     other albums identify first and only confident ones get files and
+     tags. Every album carries a batch status (pending, working, review with
+     a reason, done, failed) that survives quitting: the queue is not
+     cleared at launch while a batch is unfinished, and it resumes from the
+     status bar. A sidebar filter and "Next to Review" walk the inbox with
+     the usual inspector.
+   - **8b — library index and duplicates.** Read the library's tags once
+     (MBIDs, Discogs IDs, catalog, barcode), keep it updated on Apply, and
+     flag candidates already present.
+   - **8c — batch view for thousands.** A table with status, chosen
+     release and confidence, filters, overall progress and time left, and
+     an exportable report.
+
 ## 5. Sample files
 
 Source library: NFS mount `~/nfs` (read-only NAS share):

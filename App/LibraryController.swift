@@ -312,6 +312,17 @@ final class LibraryController {
         return context.model(for: id) as? AlbumRecord
     }
 
+    var hasUnfinishedBatch: Bool { allRecords().contains { $0.batchStatus?.isOpen == true } }
+
+    // Albums a batch was working on when the app quit start that step again.
+    func resetInterruptedBatch() {
+        for r in allRecords() where r.batchStatus == .working {
+            r.batchStatus = r.kind == .sacdISO && r.sacdOutcomes.isEmpty ? .pending : (r.identification?.isConfident == true ? .readyToFinish : .pending)
+            r.batchNote = nil
+        }
+        try? context.save()
+    }
+
     func allRecords() -> [AlbumRecord] {
         let descriptor = FetchDescriptor<AlbumRecord>(sortBy: [SortDescriptor(\.addedAt)])
         return (try? context.fetch(descriptor)) ?? []

@@ -12,6 +12,8 @@ struct ContentView: View {
     @Environment(TagService.self) private var tagging
     @Environment(AppSettings.self) private var settings
     @State private var confirmClear = false
+    @State private var startingBatch = false
+    @Environment(BatchRunner.self) private var batch
 
     var body: some View {
         @Bindable var library = library
@@ -62,15 +64,34 @@ struct ContentView: View {
                 .disabled(library.selection == nil || library.isScanning)
                 .help("Remove the selected album from the queue")
 
+                if batch.isRunning {
+                    Button {
+                        batch.stop()
+                    } label: {
+                        Label("Stop Batch", systemImage: "stop.circle")
+                    }
+                    .disabled(batch.stopping)
+                    .help("Finish the albums in progress and stop; the rest stay pending")
+                } else {
+                    Button {
+                        startingBatch = true
+                    } label: {
+                        Label("Process Queue…", systemImage: "bolt.circle")
+                    }
+                    .disabled(library.isScanning)
+                    .help("Identify and tag every album in the queue; unsure ones are set aside for review")
+                }
+
                 Button {
                     confirmClear = true
                 } label: {
                     Label("Clear Queue", systemImage: "trash")
                 }
-                .disabled(library.isScanning)
+                .disabled(library.isScanning || batch.isRunning)
                 .help("Empty the queue (files on disk are never touched)")
             }
         }
+        .sheet(isPresented: $startingBatch) { BatchStartSheet() }
         .confirmationDialog("Remove every album from the queue?", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("Clear Queue", role: .destructive) { library.removeAll() }
             Button("Cancel", role: .cancel) {}
@@ -88,6 +109,7 @@ struct ContentView: View {
             await extractFromLaunchArguments()
             await identifyFromLaunchArguments()
             await tagFromLaunchArguments()
+            await batchFromLaunchArguments()
         }
     }
 }
@@ -164,6 +186,22 @@ extension ContentView {
     }
 }
 
+extension ContentView {
+    // `--batch import|update` runs the batch over the queue and prints a
+    // summary line per album on stderr when it ends.
+    func batchFromLaunchArguments(_ arguments: [String] = CommandLine.arguments) async {
+        guard let i = arguments.firstIndex(of: "--batch") else { return }
+        let mode: BatchRunner.Mode = (i + 1 < arguments.count && arguments[i + 1] == "update") ? .updateInPlace : .importToLibrary
+        batch.start(mode: mode)
+        while batch.isRunning { try? await Task.sleep(for: .milliseconds(500)) }
+        for r in library.allRecords().sorted(by: BatchRunner.queueOrder) {
+            let status = r.batchStatus?.rawValue ?? "none"
+            FileHandle.standardError.write(Data("batch: \(r.displayTitle): \(status)\(r.batchNote.map { " – \($0)" } ?? "")\n".utf8))
+        }
+        FileHandle.standardError.write(Data("batch: finished\n".utf8))
+    }
+}
+
 // Left column: every album in the store, newest first.
 struct QueueSidebar: View {
     @Environment(LibraryController.self) private var library
@@ -171,11 +209,13 @@ struct QueueSidebar: View {
     @Query(sort: [SortDescriptor(\AlbumRecord.addedAt, order: .reverse), SortDescriptor(\AlbumRecord.displayTitle)]) private var albums: [AlbumRecord]
     @Binding var selection: PersistentIdentifier?
     @State private var search = ""
+    @State private var batchFilter: BatchFilter = .all
 
     private var filtered: [AlbumRecord] {
         let q = search.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return albums }
-        return albums.filter {
+        let inBatch = albums.filter { batchFilter.matches($0) }
+        guard !q.isEmpty else { return inBatch }
+        return inBatch.filter {
             $0.displayTitle.localizedCaseInsensitiveContains(q)
                 || ($0.artistHint?.localizedCaseInsensitiveContains(q) ?? false)
                 || $0.path.localizedCaseInsensitiveContains(q)
@@ -227,8 +267,23 @@ struct QueueSidebar: View {
                 }
             }
         }
+        .safeAreaInset(edge: .top) {
+            let counts = BatchCounts(albums)
+            if counts.total > 0 {
+                Picker("Show", selection: $batchFilter) {
+                    Text("All").tag(BatchFilter.all)
+                    Text("Review \(counts.review)").tag(BatchFilter.review)
+                    Text("Errors \(counts.failed)").tag(BatchFilter.failed)
+                    Text("Done \(counts.done)").tag(BatchFilter.done)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+            }
+        }
         .safeAreaInset(edge: .bottom) {
-            QueueStatusBar(count: albums.count)
+            QueueStatusBar(count: albums.count, counts: BatchCounts(albums))
         }
     }
 }
@@ -236,8 +291,22 @@ struct QueueSidebar: View {
 struct QueueStatusBar: View {
     @Environment(LibraryController.self) private var library
     let count: Int
+    let counts: BatchCounts
 
     var body: some View {
+        if counts.total > 0 {
+            BatchStatusLine(counts: counts)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(.bar)
+        } else {
+            plainStatus
+        }
+    }
+
+    private var plainStatus: some View {
         HStack(spacing: 8) {
             if !library.stalledRoots.isEmpty, let summary = library.lastScanSummary {
                 Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
@@ -292,6 +361,12 @@ struct QueueRow: View {
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
+                if let status = record.batchStatus, status == .review || status == .failed || status == .working {
+                    Text(status == .working ? (record.batchNote ?? String(localized: "Working…")) : (record.batchNote ?? ""))
+                        .font(.caption2)
+                        .foregroundStyle(status == .failed ? Color.red : status == .review ? Color.orange : Color.accentColor)
+                        .lineLimit(1)
+                }
             }
             Spacer(minLength: 4)
             if let p = record.setPosition {

@@ -56,6 +56,7 @@ public enum TagField {
     public static let mbWorkID = "MUSICBRAINZ_WORKID"
     public static let mbDiscID = "MUSICBRAINZ_DISCID"
     public static let discID = "DISCID"                             // FreeDB
+    public static let discogsReleaseID = "DISCOGS_RELEASE_ID"
     public static let acoustID = "ACOUSTID_ID"
     public static let acoustIDFingerprint = "ACOUSTID_FINGERPRINT"
 
@@ -66,7 +67,7 @@ public enum TagField {
         label, catalogNumber, barcode, media, releaseCountry, releaseStatus, releaseType, script, compilation, isrc,
         genre, style, composer, composerSort, lyricist, writer, arranger, conductor, performer, producer, engineer, mixer, remixer, work,
         comment, mbAlbumID, mbAlbumArtistID, mbArtistID, mbTrackID, mbReleaseTrackID, mbReleaseGroupID, mbWorkID, mbDiscID, discID,
-        acoustID, acoustIDFingerprint,
+        discogsReleaseID, acoustID, acoustIDFingerprint,
     ]
 
     // Fields that describe *which release* the file is: stale values from
@@ -75,7 +76,7 @@ public enum TagField {
     public static let identityFields: Set<String> = [
         date, originalDate, originalYear, label, catalogNumber, barcode, media, releaseCountry, releaseStatus, releaseType, script,
         isrc, mbAlbumID, mbAlbumArtistID, mbArtistID, mbTrackID, mbReleaseTrackID, mbReleaseGroupID, mbWorkID, mbDiscID, discID,
-        discSubtitle, work, artists,
+        discogsReleaseID, discSubtitle, work, artists,
     ]
 }
 
