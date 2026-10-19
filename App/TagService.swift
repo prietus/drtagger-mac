@@ -363,7 +363,10 @@ final class TagService {
             if let coverData, let first = workItems.first {
                 let folder = first.url.deletingLastPathComponent()
                 let existing = ["jpg", "jpeg", "png"].map { URL(fileURLWithPath: folder.path + "/cover.\($0)").onDisk }.first(where: \.existsOnDisk)
-                if existing == nil { try? coverData.write(to: URL(fileURLWithPath: folder.path + "/cover.\(coverExtension)").onDisk) }
+                if existing == nil {
+                    let cover = URL(fileURLWithPath: folder.path + "/cover.\(coverExtension)").onDisk
+                    if (try? coverData.write(to: cover)) != nil { TaggedFile.dropProvenanceSidecar(cover) }
+                }
             }
             return (backups, reports, problems)
         }.value
