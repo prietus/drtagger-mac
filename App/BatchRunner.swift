@@ -235,7 +235,12 @@ final class BatchRunner {
         let members = library.members(of: r)
         set(members, .working, note: String(localized: "Identifying"))
         identifying.append(r.displayTitle)
+        let started = Date()
         await identify.identify(r, members: members, settings: settings, fastPathWhenTagged: true)
+        if let result = r.identification {
+            let how = result.log.contains { $0.hasPrefix("Fast path") } ? "fast path" : (result.fingerprints != nil ? "fingerprints" : "searches")
+            Self.timing("\(r.displayTitle): identify \(Self.seconds(started)) (\(how))")
+        }
         if let i = identifying.firstIndex(of: r.displayTitle) { identifying.remove(at: i) }
         if let error = identify.error(for: r) {
             set(members, .failed, note: error)
@@ -316,7 +321,9 @@ final class BatchRunner {
         // album): wait for it and use it rather than giving up.
         while tagging.isBusy(r) { try? await Task.sleep(for: .milliseconds(200)) }
         if r.albumOnly || tagging.plan(for: r)?.candidateID != TagService.chosenCandidate(r)?.id {
-            await tagging.buildPlan(r, members: members, settings: settings, lookUpArtworkWhenCovered: false)
+            let started = Date()
+            await tagging.buildPlan(r, members: members, settings: settings, bulk: true)
+            Self.timing("\(r.displayTitle): plan \(Self.seconds(started))")
         }
         guard let plan = tagging.plan(for: r) else {
             cpuActivity = nil
@@ -389,12 +396,21 @@ final class BatchRunner {
         } else {
             set(members, .done, note: r.albumOnly ? String(localized: "Tagged as the album, without an edition") : nil)
             let folders = Set(members.flatMap { $0.tagReports.map { URL(fileURLWithPath: $0.path).deletingLastPathComponent() } })
+            let started = Date()
             await index?.update(folders: Array(folders))
+            let phases = tagging.timings(for: r).map { "\($0.0) \(String(format: "%.1f s", $0.1))" } + ["index \(Self.seconds(started))"]
+            Self.timing("\(r.displayTitle): " + phases.joined(separator: " · "))
         }
         save()
     }
 
     // MARK: Helpers
+
+    // Where each album's time goes, on stderr as it happens ("batch-time:").
+    nonisolated static func timing(_ line: String) {
+        FileHandle.standardError.write(Data("batch-time: \(line)\n".utf8))
+    }
+    nonisolated static func seconds(_ since: Date) -> String { String(format: "%.1f s", Date().timeIntervalSince(since)) }
 
     nonisolated static func releaseKey(_ c: Candidate) -> String {
         c.source == .musicbrainz ? "mb:" + c.providerID.lowercased() : c.source == .discogs ? "discogs:" + c.providerID : c.id

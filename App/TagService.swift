@@ -35,6 +35,7 @@ struct TagPlan: Sendable, Equatable {
     var artworkOptions: [ArtworkOption]
     var coverOptionID: String?           // nil: keep the pictures the files have
     var cover: FetchedArtwork?
+    var embedCover = true                // false: `cover` only becomes the folder's cover.jpg
     var warnings: [String]
     var log: [String]
 
@@ -71,6 +72,8 @@ final class TagService {
     private var leaders: [String: String] = [:]     // member path → plan key (the set's first record)
     private var detailCache: [String: Candidate] = [:] // candidate id → release with its tracklist
     private var coverDistances: [String: Float] = [:]  // album path + candidate id → cover distance (-1: no image)
+    private(set) var timings: [String: [(String, Double)]] = [:]   // album path → seconds per phase of the last apply
+    func timings(for record: AlbumRecord) -> [(String, Double)] { timings[key(record)] ?? [] }
 
     private func key(_ record: AlbumRecord) -> String { leaders[record.path] ?? record.path }
     func isBusy(_ record: AlbumRecord) -> Bool { activity[key(record)] != nil }
@@ -117,7 +120,10 @@ final class TagService {
         return (out.map { (url: $0.0, disc: $0.1, track: $0.2, owner: $0.3) }, nil)
     }
 
-    func buildPlan(_ record: AlbumRecord, members: [AlbumRecord] = [], settings: AppSettings, lookUpArtworkWhenCovered: Bool = true) async {
+    // `bulk`: a batch over many albums. A cover the files have stays, a
+    // missing one is never embedded, and artwork is looked up only when the
+    // folder has no cover file to leave beside the tracks.
+    func buildPlan(_ record: AlbumRecord, members: [AlbumRecord] = [], settings: AppSettings, bulk: Bool = false) async {
         let members = members.isEmpty ? [record] : members
         let leader = members.first ?? record
         for m in members { leaders[m.path] = leader.path }
@@ -221,13 +227,15 @@ final class TagService {
         plan.alreadyTagged = !tracks.isEmpty && tracks.allSatisfy { $0.existing.first(idField)?.lowercased() == candidate.providerID.lowercased() }
         // Files that already have a front cover keep it unless one is chosen.
         let keepCover = leader.coverOptionID == nil && tracks.allSatisfy { $0.existingPictures.contains { $0.kind == .front } }
-        if settings.embedFrontCover {
+        if bulk { plan.embedCover = false }
+        let wantsArtwork = bulk ? Self.folderCover(leader.detected) == nil : settings.embedFrontCover
+        if wantsArtwork {
             activity[path] = Activity(message: String(localized: "Looking for artwork…"), fraction: nil)
             let logBox = LogBox()
             let fetcher = CoverArtFetcher(userAgent: IdentifyService.userAgent, fanartKey: settings.isFanartConfigured ? settings.fanartKey.trimmed : nil)
             // Batches leave a cover the files already have alone and do not
             // ask four services for alternatives nobody will look at.
-            let options = (keepCover && !lookUpArtworkWhenCovered) ? [] : await fetcher.options(for: candidate, discogs: context.discogs, album: leader.detected) { logBox.append($0) }
+            let options = (keepCover && bulk) ? [] : await fetcher.options(for: candidate, discogs: context.discogs, album: leader.detected) { logBox.append($0) }
             plan.artworkOptions = options
             let preferred = leader.coverOptionID.flatMap { id in options.first { $0.id == id } }
             if keepCover { logBox.append("Artwork: the files already have a front cover; it is kept unless you choose another.") }
@@ -316,14 +324,19 @@ final class TagService {
         errors[path] = nil
         activity[path] = Activity(message: String(localized: "Writing tags…"), fraction: 0)
         for m in members { m.state = .applying }
-        let embed: Picture? = plan.cover.flatMap { try? ArtworkProcessor.prepared(from: $0.data, maxPixels: settings.embedCoverMaxPixels) }
-        let coverData = settings.saveCoverFile ? plan.cover?.data : nil
+        let embed: Picture? = plan.embedCover ? plan.cover.flatMap { try? ArtworkProcessor.prepared(from: $0.data, maxPixels: settings.embedCoverMaxPixels) } : nil
+        let coverData = (settings.saveCoverFile || !plan.embedCover) ? plan.cover?.data : nil
+        var phases: [(String, Double)] = []
+        var phaseStart = Date()
+        func phase(_ name: String) { phases.append((name, Date().timeIntervalSince(phaseStart))); phaseStart = Date() }
         let coverExtension = plan.cover.map { ArtworkProcessor.mimeType(of: $0.data) == "image/png" ? "png" : "jpg" } ?? "jpg"
         var work = plan.tracks
         var problems: [String] = []
 
-        // 1. Loudness first, so ReplayGain lands in the same write.
-        if settings.computeReplayGain, let location = settings.ffmpegLocator.locate(), let probe = location.ffprobe {
+        // 1. Loudness first, so ReplayGain lands in the same write; files
+        // that already carry ReplayGain keep what they have.
+        let hasReplayGain = !work.isEmpty && work.allSatisfy { !$0.existing["REPLAYGAIN_TRACK_GAIN"].isEmpty && !$0.existing["REPLAYGAIN_ALBUM_GAIN"].isEmpty }
+        if settings.computeReplayGain, !hasReplayGain, let location = settings.ffmpegLocator.locate(), let probe = location.ffprobe {
             activity[path] = Activity(message: String(localized: "Measuring loudness…"), fraction: 0)
             let analyzer = LoudnessAnalyzer(tool: FFmpegTool(ffmpeg: location.ffmpeg, ffprobe: probe))
             do {
@@ -342,6 +355,7 @@ final class TagService {
                 problems.append(String(localized: "Loudness measurement failed: \(error.localizedDescription)"))
             }
         }
+        phase("loudness")
         let workItems = work
         let total = workItems.count
         let progress: @Sendable (Int) -> Void = { [weak self] done in
@@ -371,6 +385,7 @@ final class TagService {
             return (backups, reports, problems)
         }.value
         problems.append(contentsOf: outcome.problems)
+        phase("write")
         // Every file belongs to one member; backups, reports and moves stay with it.
         let ownerOf = Dictionary(work.map { ($0.url.path, $0.owner) }, uniquingKeysWith: { a, _ in a })
         var backupsByOwner: [String: [TagBackup]] = [:]
@@ -413,6 +428,8 @@ final class TagService {
             }
         }
 
+        phase("organize")
+        timings[path] = phases
         // The first backups are the true originals; later applies keep them.
         for m in members {
             if m.tagBackups.isEmpty { m.tagBackups = backupsByOwner[m.path] ?? [] }
