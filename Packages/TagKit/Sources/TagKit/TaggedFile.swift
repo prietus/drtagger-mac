@@ -164,6 +164,14 @@ public enum TaggedFile {
             throw TagFileError.audioChanged(expected: expectedDigest, actual: digest)
         }
         let size = (try? tmp.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
+        // The verified bytes go into the original file: a new file carries
+        // com.apple.provenance, which shares without extended attributes
+        // keep as a "._" file next to every track. If copying fails midway
+        // the temporary file, still intact, replaces the original.
+        if (try? overwrite(url, with: tmp, size: size)) != nil {
+            try? fm.removeItem(at: tmp)
+            return TagWriteReport(path: url.path, container: kind, audioDigest: digest, bytesWritten: size, pictureCount: max(0, pictureCount))
+        }
         let created = try? url.resourceValues(forKeys: [.creationDateKey]).creationDate
         _ = try fm.replaceItemAt(url, withItemAt: tmp)
         if let created {
@@ -173,5 +181,19 @@ public enum TaggedFile {
             try? u.setResourceValues(values)
         }
         return TagWriteReport(path: url.path, container: kind, audioDigest: digest, bytesWritten: size, pictureCount: max(0, pictureCount))
+    }
+
+    private static func overwrite(_ url: URL, with source: URL, size: Int64) throws {
+        let input = try FileHandle(forReadingFrom: source)
+        defer { try? input.close() }
+        let fd = url.path.withCString { open($0, O_WRONLY) }
+        guard fd >= 0 else { throw CocoaError(.fileWriteNoPermission) }
+        let output = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        while let chunk = try input.read(upToCount: 4 << 20), !chunk.isEmpty {
+            try output.write(contentsOf: chunk)
+        }
+        try output.truncate(atOffset: UInt64(size))
+        try output.synchronize()
+        try output.close()
     }
 }
