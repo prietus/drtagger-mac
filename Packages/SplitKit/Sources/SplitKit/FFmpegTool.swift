@@ -190,6 +190,29 @@ public struct FFmpegTool: Sendable {
         return size / Int64(format.bytesPerFrame)
     }
 
+    // Decodes the whole file to raw interleaved PCM and hands it over in
+    // chunks as ffmpeg produces it: nothing goes to disk (a DSD album
+    // decoded to files is gigabytes). ffmpeg runs at utility priority.
+    // Returns the byte count.
+    @discardableResult
+    public func decodeStreaming(_ url: URL, format: PCMFormat, consume: @escaping @Sendable (Data) throws -> Void) async throws -> Int64 {
+        let args = [
+            "-v", "error", "-nostdin",
+            "-i", url.path,
+            "-map", "0:a:0", "-vn",
+            "-f", format.ffmpegFormatName,
+            "-acodec", format.ffmpegCodecName,
+            "-ar", String(format.sampleRate),
+            "-ac", String(format.channels),
+            "pipe:1",
+        ]
+        let (status, bytes, stderr) = try await ProcessLauncher.stream(ffmpeg, arguments: args, consume: consume)
+        guard status == 0 else {
+            throw ToolError.failed(command: "ffmpeg decode", status: status, stderr: stderr)
+        }
+        return bytes
+    }
+
     // MARK: Encode
 
     // Encodes a byte range of a raw PCM file to FLAC, feeding ffmpeg's stdin.
@@ -328,6 +351,51 @@ enum ProcessLauncher {
             }
         } onCancel: {
             if process.isRunning { process.terminate() }
+        }
+    }
+
+    // stdout read in chunks on a background queue and handed to `consume`;
+    // a throwing consumer stops the process.
+    static func stream(_ executable: URL, arguments: [String], chunkBytes: Int = 1 << 20,
+                       consume: @escaping @Sendable (Data) throws -> Void) async throws -> (status: Int32, bytes: Int64, stderr: String) {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments.map(ProcessPaths.argument)
+        process.qualityOfService = .utility
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+        process.standardInput = FileHandle.nullDevice
+        let collector = Collector()
+        errPipe.fileHandleForReading.readabilityHandler = { h in collector.append(h.availableData, err: true) }
+        do {
+            try process.run()
+        } catch {
+            errPipe.fileHandleForReading.readabilityHandler = nil
+            throw FFmpegTool.ToolError.launchFailed(error.localizedDescription)
+        }
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(status: Int32, bytes: Int64, stderr: String), any Error>) in
+                DispatchQueue.global(qos: .utility).async {
+                    let reader = outPipe.fileHandleForReading
+                    var bytes: Int64 = 0
+                    var failure: (any Error)?
+                    while let data = try? reader.read(upToCount: chunkBytes), !data.isEmpty {
+                        guard failure == nil else { continue }   // drain so ffmpeg can exit
+                        bytes += Int64(data.count)
+                        do { try consume(data) } catch { failure = error; process.terminate() }
+                    }
+                    process.waitUntilExit()
+                    errPipe.fileHandleForReading.readabilityHandler = nil
+                    collector.append(errPipe.fileHandleForReading.readDataToEndOfFile(), err: true)
+                    if let failure { continuation.resume(throwing: failure); return }
+                    let stderr = String(decoding: collector.snapshot().1, as: UTF8.self)
+                    continuation.resume(returning: (process.terminationStatus, bytes, stderr))
+                }
+            }
+        } onCancel: {
+            process.terminate()
         }
     }
 
