@@ -1,9 +1,9 @@
 import Foundation
 
 // Runs an external executable and collects its output. Both pipes are
-// drained concurrently through readabilityHandler so a chatty child (ffmpeg
-// writes its banner and progress to stderr) can never fill a pipe buffer and
-// deadlock before it exits. Suitable for short commands whose full output
+// drained concurrently so a chatty child (ffmpeg writes its banner and
+// progress to stderr) can never fill a pipe buffer and deadlock before it
+// exits. Suitable for short commands whose full output
 // fits in memory; streaming decode pipelines get their own runner later.
 enum ProcessRunner {
 
@@ -31,45 +31,40 @@ enum ProcessRunner {
         arguments: [String],
         environment: [String: String]? = nil
     ) async throws -> Result {
-        try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            process.executableURL = executable
-            process.arguments = arguments
-            if let environment {
-                process.environment = environment
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        if let environment {
+            process.environment = environment
+        }
+        let outPipe = Pipe()
+        let errPipe = Pipe()
+        process.standardOutput = outPipe
+        process.standardError = errPipe
+        process.standardInput = FileHandle.nullDevice
+        // Pipes are read to end-of-file on their own threads, never with a
+        // readabilityHandler, and the exit comes through the termination
+        // handler (see ProcessLauncher in SplitKit).
+        let collector = OutputCollector()
+        let done = DispatchGroup()
+        done.enter()
+        process.terminationHandler = { _ in done.leave() }
+        do {
+            try process.run()
+        } catch {
+            throw RunError.launchFailed(error.localizedDescription)
+        }
+        for (handle, stream) in [(outPipe.fileHandleForReading, OutputCollector.Stream.stdout), (errPipe.fileHandleForReading, .stderr)] {
+            done.enter()
+            DispatchQueue.global(qos: .utility).async {
+                collector.append(handle.readDataToEndOfFile(), to: stream)
+                done.leave()
             }
-
-            let outPipe = Pipe()
-            let errPipe = Pipe()
-            process.standardOutput = outPipe
-            process.standardError = errPipe
-            process.standardInput = FileHandle.nullDevice
-
-            let collector = OutputCollector()
-            outPipe.fileHandleForReading.readabilityHandler = { handle in
-                collector.append(handle.availableData, to: .stdout)
-            }
-            errPipe.fileHandleForReading.readabilityHandler = { handle in
-                collector.append(handle.availableData, to: .stderr)
-            }
-
-            process.terminationHandler = { proc in
-                // Drain whatever is left after termination, then detach
-                // the handlers so the pipes can close.
-                outPipe.fileHandleForReading.readabilityHandler = nil
-                errPipe.fileHandleForReading.readabilityHandler = nil
-                collector.append(outPipe.fileHandleForReading.readDataToEndOfFile(), to: .stdout)
-                collector.append(errPipe.fileHandleForReading.readDataToEndOfFile(), to: .stderr)
+        }
+        return await withCheckedContinuation { continuation in
+            done.notify(queue: .global(qos: .utility)) {
                 let (out, err) = collector.snapshot()
-                continuation.resume(returning: Result(status: proc.terminationStatus, stdout: out, stderr: err))
-            }
-
-            do {
-                try process.run()
-            } catch {
-                outPipe.fileHandleForReading.readabilityHandler = nil
-                errPipe.fileHandleForReading.readabilityHandler = nil
-                continuation.resume(throwing: RunError.launchFailed(error.localizedDescription))
+                continuation.resume(returning: Result(status: process.terminationStatus, stdout: out, stderr: err))
             }
         }
     }

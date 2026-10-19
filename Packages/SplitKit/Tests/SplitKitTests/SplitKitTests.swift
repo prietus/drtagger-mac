@@ -68,6 +68,45 @@ enum TestTools {
     }
 }
 
+@Suite("ProcessLauncher")
+struct ProcessLauncherTests {
+    static let sh = URL(fileURLWithPath: "/bin/sh")
+
+    // Many children exiting at once, some streaming: no exit may be missed
+    // and no output lost (a missed exit once held a batch at 100 % CPU).
+    @Test(.timeLimit(.minutes(1))) func childrenExitingAtOnceAreAllCollected() async throws {
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for i in 0..<64 {
+                group.addTask {
+                    let r = try await ProcessLauncher.run(Self.sh, arguments: ["-c", "echo out\(i); echo err\(i) 1>&2; exit \(i % 3)"])
+                    #expect(r.status == Int32(i % 3) && r.stdout == Data("out\(i)\n".utf8) && r.stderrText == "err\(i)\n")
+                }
+                if i % 4 == 0 {
+                    group.addTask {
+                        let (status, bytes, stderr) = try await ProcessLauncher.stream(Self.sh, arguments: ["-c", "head -c 3000000 /dev/zero; echo done 1>&2"]) { _ in }
+                        #expect(status == 0 && bytes == 3_000_000 && stderr == "done\n")
+                    }
+                }
+            }
+            try await group.waitForAll()
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func aThrowingConsumerStopsTheStream() async throws {
+        struct Enough: Error {}
+        await #expect(throws: Enough.self) {
+            try await ProcessLauncher.stream(Self.sh, arguments: ["-c", "yes"]) { _ in throw Enough() }
+        }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func stdinIsFedAndTheExitStatusKept() async throws {
+        let r = try await ProcessLauncher.run(Self.sh, arguments: ["-c", "cat; exit 7"]) { writer in
+            try writer.write(contentsOf: Data("fed\n".utf8))
+        }
+        #expect(r.status == 7 && r.stdout == Data("fed\n".utf8))
+    }
+}
+
 @Suite("PathTemplate")
 struct PathTemplateTests {
     @Test func rendersAndSanitizes() {

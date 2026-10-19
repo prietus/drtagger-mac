@@ -297,6 +297,14 @@ enum ProcessLauncher {
 
     typealias StdinFeeder = @Sendable (FileHandle) throws -> Void
 
+    // Each pipe is drained to end-of-file on its own thread and the exit
+    // arrives through the termination handler; the result is ready when
+    // all three have happened. No readabilityHandler: once the child
+    // closes its end, Foundation re-invokes a handler without pause on the
+    // one serial queue it monitors every file handle with, and a task's
+    // exit is not delivered while that queue spins (a batch sat on one
+    // album at 100 % CPU). No waitUntilExit either: from a worker thread
+    // it does not always return once the child is gone.
     static func run(_ executable: URL, arguments: [String], stdin feeder: StdinFeeder? = nil) async throws -> Result {
         let process = Process()
         process.executableURL = executable
@@ -310,42 +318,42 @@ enum ProcessLauncher {
         process.standardInput = inPipe ?? FileHandle.nullDevice
 
         let collector = Collector()
-        outPipe.fileHandleForReading.readabilityHandler = { h in collector.append(h.availableData, err: false) }
-        errPipe.fileHandleForReading.readabilityHandler = { h in collector.append(h.availableData, err: true) }
-
+        let done = DispatchGroup()
+        done.enter()
+        process.terminationHandler = { _ in done.leave() }
+        do {
+            try process.run()
+        } catch {
+            throw FFmpegTool.ToolError.launchFailed(error.localizedDescription)
+        }
+        if let feeder, let inPipe {
+            let writer = inPipe.fileHandleForWriting
+            Thread.detachNewThread {
+                do {
+                    try feeder(writer)
+                } catch {
+                    // EPIPE when ffmpeg exits early is reported through
+                    // the exit status; keep the first real error.
+                    collector.setFeedError(error)
+                }
+                try? writer.close()
+            }
+        }
+        for (handle, isErr) in [(outPipe.fileHandleForReading, false), (errPipe.fileHandleForReading, true)] {
+            done.enter()
+            DispatchQueue.global(qos: .utility).async {
+                collector.append(handle.readDataToEndOfFile(), err: isErr)
+                done.leave()
+            }
+        }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Result, any Error>) in
-                process.terminationHandler = { proc in
-                    outPipe.fileHandleForReading.readabilityHandler = nil
-                    errPipe.fileHandleForReading.readabilityHandler = nil
-                    collector.append(outPipe.fileHandleForReading.readDataToEndOfFile(), err: false)
-                    collector.append(errPipe.fileHandleForReading.readDataToEndOfFile(), err: true)
+                done.notify(queue: .global(qos: .utility)) {
                     let (out, err) = collector.snapshot()
                     if let feedError = collector.feedError {
                         continuation.resume(throwing: feedError)
                     } else {
-                        continuation.resume(returning: Result(status: proc.terminationStatus, stdout: out, stderr: err))
-                    }
-                }
-                do {
-                    try process.run()
-                } catch {
-                    outPipe.fileHandleForReading.readabilityHandler = nil
-                    errPipe.fileHandleForReading.readabilityHandler = nil
-                    continuation.resume(throwing: FFmpegTool.ToolError.launchFailed(error.localizedDescription))
-                    return
-                }
-                if let feeder, let inPipe {
-                    let writer = inPipe.fileHandleForWriting
-                    Thread.detachNewThread {
-                        do {
-                            try feeder(writer)
-                        } catch {
-                            // EPIPE when ffmpeg exits early is reported through
-                            // the exit status; keep the first real error.
-                            collector.setFeedError(error)
-                        }
-                        try? writer.close()
+                        continuation.resume(returning: Result(status: process.terminationStatus, stdout: out, stderr: err))
                     }
                 }
             }
@@ -354,8 +362,8 @@ enum ProcessLauncher {
         }
     }
 
-    // stdout read in chunks on a background queue and handed to `consume`;
-    // a throwing consumer stops the process.
+    // stdout is read in chunks and handed to `consume` as the child
+    // produces it; a throwing consumer stops the process.
     static func stream(_ executable: URL, arguments: [String], chunkBytes: Int = 1 << 20,
                        consume: @escaping @Sendable (Data) throws -> Void) async throws -> (status: Int32, bytes: Int64, stderr: String) {
         let process = Process()
@@ -368,12 +376,18 @@ enum ProcessLauncher {
         process.standardError = errPipe
         process.standardInput = FileHandle.nullDevice
         let collector = Collector()
-        errPipe.fileHandleForReading.readabilityHandler = { h in collector.append(h.availableData, err: true) }
+        let done = DispatchGroup()
+        done.enter()
+        process.terminationHandler = { _ in done.leave() }
         do {
             try process.run()
         } catch {
-            errPipe.fileHandleForReading.readabilityHandler = nil
             throw FFmpegTool.ToolError.launchFailed(error.localizedDescription)
+        }
+        done.enter()
+        DispatchQueue.global(qos: .utility).async {
+            collector.append(errPipe.fileHandleForReading.readDataToEndOfFile(), err: true)
+            done.leave()
         }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(status: Int32, bytes: Int64, stderr: String), any Error>) in
@@ -382,20 +396,18 @@ enum ProcessLauncher {
                     var bytes: Int64 = 0
                     var failure: (any Error)?
                     while let data = try? reader.read(upToCount: chunkBytes), !data.isEmpty {
-                        guard failure == nil else { continue }   // drain so ffmpeg can exit
+                        guard failure == nil else { continue }   // drain so the child can exit
                         bytes += Int64(data.count)
                         do { try consume(data) } catch { failure = error; process.terminate() }
                     }
-                    process.waitUntilExit()
-                    errPipe.fileHandleForReading.readabilityHandler = nil
-                    collector.append(errPipe.fileHandleForReading.readDataToEndOfFile(), err: true)
+                    done.wait()
                     if let failure { continuation.resume(throwing: failure); return }
                     let stderr = String(decoding: collector.snapshot().1, as: UTF8.self)
                     continuation.resume(returning: (process.terminationStatus, bytes, stderr))
                 }
             }
         } onCancel: {
-            process.terminate()
+            if process.isRunning { process.terminate() }
         }
     }
 
