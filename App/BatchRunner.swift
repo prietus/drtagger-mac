@@ -247,6 +247,9 @@ final class BatchRunner {
             // The release the files already name, and it fits: confirmed.
             identify.select(best, for: r, members: members)
             set(members, .readyToFinish, note: nil)
+        } else if let result = r.identification, result.isClearBarcodeMatch, let best = result.best {
+            identify.select(best, for: r, members: members)
+            set(members, .readyToFinish, note: nil)
         } else if let result = r.identification, result.isClearFingerprintMatch, let best = result.best {
             identify.select(best, for: r, members: members)
             set(members, .readyToFinish, note: nil)

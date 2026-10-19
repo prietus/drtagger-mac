@@ -47,6 +47,7 @@ final class IdentifyService {
         var config = IdentifierConfig(userAgent: Self.userAgent, acoustIDKey: acoustIDKey, discogsToken: discogsToken)
         config.scanArtwork = true
         config.fastPathWhenTagged = fastPathWhenTagged
+        config.fastPathWithBarcode = fastPathWhenTagged
         let identifier = Identifier(config: config, tool: FFmpegTool(ffmpeg: location.ffmpeg, ffprobe: probe))
         let toc = record.toc
         let ctdb = record.ctdbReport?.metadata ?? []

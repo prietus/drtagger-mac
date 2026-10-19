@@ -382,6 +382,37 @@ struct MatchScorerTests {
                 "a SACD edition is known: pick it, not the album")
     }
 
+    @Test func aBarcodeThatFitsTheTracksIsClear() {
+        var signals = AlbumSignals()
+        signals.tracks = (0..<8).map { LocalTrack(index: $0, discNumber: 1, title: nil, durationSeconds: 300, url: nil) }
+        signals.barcodes = [SignalValue("4943674083770", origin: .artwork)]
+        func scored(_ id: String, barcode: String?, source: Candidate.Source = .musicbrainz, score: Double = 100, catno: String? = nil,
+                    format: FormatCompatibility = .fits, fit: Double = 1) -> ScoredCandidate {
+            ScoredCandidate(candidate: Candidate(source: source, providerID: id, title: "Houses of the Holy", artist: "Led Zeppelin", catalogNumber: catno, barcode: barcode),
+                            score: score, confidence: .likely, reasons: [], origins: [.barcode], durationFit: fit,
+                            trackCountMatches: true, fingerprintCoverage: nil, formatCompatibility: format)
+        }
+        func result(_ c: [ScoredCandidate], _ s: AlbumSignals = signals) -> IdentificationResult {
+            IdentificationResult(signals: s, fingerprints: nil, candidates: c, discogsCandidates: [], log: [], startedAt: Date(), elapsedSeconds: 0)
+        }
+        let jp = scored("jp", barcode: "4943674083770")
+        #expect(result([jp]).isClearBarcodeMatch)
+        #expect(result([jp, scored("d", barcode: "4943674083770", source: .discogs, score: 80)]).isClearBarcodeMatch, "the same pressing on Discogs")
+        #expect(result([jp, scored("us", barcode: "075678265327", score: 85)]).isClearBarcodeMatch == false, "another edition within 30 points")
+        #expect(result([jp, scored("us", barcode: "075678265327", score: 60)]).isClearBarcodeMatch, "another edition far behind")
+        #expect(result([scored("jp", barcode: "4943674083770", fit: 0.5)]).isClearBarcodeMatch == false, "durations do not fit: scans of another album")
+        #expect(result([scored("jp", barcode: "4943674083770", format: .unlikely)]).isClearBarcodeMatch == false, "a CD for DSD files")
+        #expect(result([scored("us", barcode: "075678265327")]).isClearBarcodeMatch == false, "not the album's barcode")
+        var coded = signals
+        coded.catalogNumbers = [SignalValue("WPCR-13134", origin: .artwork)]
+        // An OCR'd catalog number that disagrees does not outweigh a barcode
+        // read with its check digit (catalogs are shared across formats).
+        #expect(result([scored("jp", barcode: "4943674083770", catno: "WPCR-11615")], coded).isClearBarcodeMatch)
+        var otherCode = signals
+        otherCode.barcodes.append(SignalValue("075678265327", origin: .folderName))
+        #expect(result([scored("jp", barcode: "4943674083770")], otherCode).isClearBarcodeMatch, "one of the album's barcodes is this edition's")
+    }
+
     @Test func printedWordsAreNotCatalogs() {
         let found = CatalogNumberParser.extract(from: ["EUROPE-2006", "MADE IN JAPAN 2006", "WPZR-30194", "RECORDED IN 1969",
                                                        "HOLLYWOOD, CA 90068", "FOR 1954", "THIS 2011"]).map(\.formatted)

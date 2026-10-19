@@ -13,6 +13,9 @@ public struct IdentifierConfig: Sendable {
     // Batches over a tagged library: when the files' release ID fits them,
     // only that release is checked (no searches, no fingerprints).
     public var fastPathWhenTagged = false
+    // A barcode from the sleeve, folder or tags that names one edition
+    // fitting the tracks decides it: no fingerprints, no text searches.
+    public var fastPathWithBarcode = false
     public var maxCandidates = 25
 
     public init(userAgent: String, acoustIDKey: String? = nil, discogsToken: String? = nil) {
@@ -62,6 +65,19 @@ public struct IdentificationResult: Sendable, Codable, Hashable {
               best.trackCountMatches == true,
               (best.durationFit ?? 0) >= 0.75, !MatchScorer.contradictsLocalCodes(best.candidate, signals: signals) else { return false }
         return best.score - (runnerUp?.score ?? 0) >= 30
+    }
+
+    // The barcode found on the album names the best candidate, which fits
+    // the files, and every other edition carrying it is the same pressing
+    // entered twice; anything else stands 30 points below. Vision reads
+    // barcodes with their check digit, so one that is wrong is rare, and
+    // the track count and durations rule out scans of another album.
+    public var isClearBarcodeMatch: Bool {
+        guard let best, best.trackCountMatches == true, (best.durationFit ?? 0) >= 0.75,
+              best.formatCompatibility != .unlikely,
+              let code = best.candidate.barcode, signals.uniqueBarcodes.contains(where: { MatchScorer.barcodesEqual($0, code) }),
+              !MatchScorer.contradictsLocalCodes(best.candidate, signals: signals) else { return false }
+        return candidates.dropFirst().allSatisfy { MatchScorer.areTwins($0.candidate, best.candidate) || best.score - $0.score >= 30 }
     }
 
     // Editions whose audio is proven on every track but that tie on the
@@ -217,6 +233,8 @@ public actor Identifier {
             log("The release ID in the tags does not match the barcode / catalog number found; searching every edition.")
         }
         let fast = config.fastPathWhenTagged && taggedFit
+        var codedFit = false
+        var detailFetches = 0
         var fingerprints: FingerprintOutcome? = nil
         var discogsCandidates: [Candidate] = []
         if fast {
@@ -255,11 +273,34 @@ public actor Identifier {
             }
         }
 
+        // 3b. One edition carries the album's barcode and fits the tracks:
+        // the edition is decided; what follows would only confirm it.
+        if config.fastPathWithBarcode, !signals.uniqueBarcodes.isEmpty {
+            let hits = order.filter { origins[$0]?.contains(.barcode) == true }
+            for id in hits.prefix(4) where pool[id]!.source == .musicbrainz && pool[id]!.allTracks.isEmpty {
+                if let c = try? await musicBrainz.releaseDetail(id: id) {
+                    pool[id] = c
+                    detailFetches += 1
+                }
+            }
+            let fitting = hits.filter { id in
+                let s = MatchScorer.score(pool[id]!, signals: signals, origins: Array(origins[id] ?? []), fingerprintVote: nil, fingerprintedTracks: 0)
+                return s.trackCountMatches == true && (s.durationFit ?? 0) >= 0.75 && s.formatCompatibility != .unlikely
+                    && !MatchScorer.contradictsLocalCodes(pool[id]!, signals: signals)
+            }
+            if let first = fitting.first, fitting.allSatisfy({ MatchScorer.areTwins(pool[$0]!, pool[first]!) }) {
+                codedFit = true
+                log("Fast path: the barcode names one edition that fits the tracks; fingerprints and text searches skipped.")
+            } else if hits.count > 1 {
+                log("The barcode names \(fitting.count) fitting edition(s) of \(hits.count): no fast path.")
+            }
+        }
+
         // 4. Fingerprints. Skipped when the files' own release ID already
         // fits them (track count and durations): a tagged library needs no
         // audio read, which matters over the network.
-        if taggedFit, config.useFingerprints, acoustID != nil {
-            log("Fingerprints skipped: the release ID in the tags fits the tracks.")
+        if taggedFit || codedFit, config.useFingerprints, acoustID != nil {
+            log(taggedFit ? "Fingerprints skipped: the release ID in the tags fits the tracks." : "Fingerprints skipped: the barcode decided the edition.")
         } else if config.useFingerprints, let acoustID {
             progress(IdentifyProgress(fraction: 0.45, message: "Fingerprinting tracks"))
             let service = FingerprintService(tool: tool, acoustID: acoustID)
@@ -288,7 +329,7 @@ public actor Identifier {
 
         // 5. Text search: cheap, and the only way to reach editions the
         // strong signals missed (limit 15 keeps SACD/vinyl variants in reach).
-        if let title = signals.albumHint, !title.isEmpty {
+        if !codedFit, let title = signals.albumHint, !title.isEmpty {
             progress(IdentifyProgress(fraction: 0.7, message: "Searching by title"))
             // With an edition in the name, ask for it first: the plain title
             // search ranks the original pressings ahead of reissues.
@@ -333,7 +374,6 @@ public actor Identifier {
 
         // 6. Details for candidates that arrived without tracks, best first.
         progress(IdentifyProgress(fraction: 0.8, message: "Fetching release details"))
-        var detailFetches = 0
         let provisional = order.map { id -> (String, Double) in
             let c = pool[id]!
             let s = MatchScorer.score(c, signals: signals, origins: Array(origins[id] ?? []), fingerprintVote: fingerprints?.votes.first { $0.releaseID == id }, fingerprintedTracks: fingerprints?.fingerprintedTracks ?? 0)
