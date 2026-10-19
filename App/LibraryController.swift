@@ -409,9 +409,11 @@ final class LibraryController {
         try? context.save()
     }
 
+    // Sorted here, not by SQLite: sorting rows that carry the large
+    // identification blobs spilled to disk and held the main thread.
     func allRecords() -> [AlbumRecord] {
-        let descriptor = FetchDescriptor<AlbumRecord>(sortBy: [SortDescriptor(\.addedAt)])
-        return (try? context.fetch(descriptor)) ?? []
+        let records = (try? context.fetch(FetchDescriptor<AlbumRecord>())) ?? []
+        return records.sorted { $0.addedAt < $1.addedAt }
     }
 
     // MARK: Removing

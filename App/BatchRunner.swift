@@ -150,7 +150,7 @@ final class BatchRunner {
             guard let r = next(where: { r, members in
                 r.batchStatus == .readyToIdentify || (r.batchStatus == .pending && !self.extractFirst(r, members))
             }) else {
-                if hasWork(for: .network) { try? await Task.sleep(for: .milliseconds(500)); continue }
+                if hasWork(for: .network) { try? await Task.sleep(for: .seconds(2)); continue }
                 return
             }
             await identifyStep(r)
@@ -162,7 +162,7 @@ final class BatchRunner {
             guard let r = next(where: { r, members in
                 r.batchStatus == .readyToFinish || (r.batchStatus == .pending && self.extractFirst(r, members))
             }) else {
-                if hasWork(for: .cpu) { try? await Task.sleep(for: .milliseconds(500)); continue }
+                if hasWork(for: .cpu) { try? await Task.sleep(for: .seconds(1)); continue }
                 return
             }
             if r.batchStatus == .pending { await extractStep(r) } else { await finishStep(r) }
@@ -171,17 +171,21 @@ final class BatchRunner {
 
     private enum Worker { case network, cpu }
 
-    // Something the other worker may still hand over.
+    // Something the other worker may still hand over. Identification only
+    // gets albums back from an extraction; finishing gets every album an
+    // identification is working on.
     private func hasWork(for worker: Worker) -> Bool {
         guard let library else { return false }
+        if worker == .network, extracting > 0 { return true }
         return library.allRecords().contains { r in
             guard let s = r.batchStatus else { return false }
             switch worker {
-            case .network: return s == .working || s == .readyToFinish || s == .pending
+            case .network: return s == .pending || s == .readyToIdentify
             case .cpu: return s == .working || s == .readyToIdentify || s == .pending
             }
         }
     }
+    private var extracting = 0
 
     // SACD images are extracted before they are identified (fingerprints).
     private func extractFirst(_ r: AlbumRecord, _ members: [AlbumRecord]) -> Bool {
@@ -217,6 +221,8 @@ final class BatchRunner {
         guard let library, let disc, let settings else { return }
         let members = library.members(of: r)
         set(members, .working, note: String(localized: "Extracting"))
+        extracting += 1
+        defer { extracting -= 1 }
         cpuActivity = String(localized: "Extracting \(r.displayTitle)")
         let ok = await Workflow.produceFiles(members, disc: disc, settings: settings)
         cpuActivity = nil

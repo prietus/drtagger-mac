@@ -248,7 +248,12 @@ extension ContentView {
 struct QueueSidebar: View {
     @Environment(LibraryController.self) private var library
     // Newest scan first; albums added by the same scan in title order.
-    @Query(sort: [SortDescriptor(\AlbumRecord.addedAt, order: .reverse), SortDescriptor(\AlbumRecord.displayTitle)]) private var albums: [AlbumRecord]
+    // Sorted here: SQLite sorting rows with the identification blobs
+    // spilled to disk on every save and held the main thread.
+    @Query private var queried: [AlbumRecord]
+    private var albums: [AlbumRecord] {
+        queried.sorted { $0.addedAt != $1.addedAt ? $0.addedAt > $1.addedAt : $0.displayTitle < $1.displayTitle }
+    }
     @State private var search = ""
     @State private var batchFilter: BatchFilter = .all
 
