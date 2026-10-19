@@ -145,9 +145,15 @@ enum Fixtures {
         #expect(t.first(TagField.mbReleaseGroupID) == "rg-1" && t.first(TagField.mbTrackID) == "rec-1")
         #expect(t.first(TagField.media) == "SACD")
         for field in [TagField.mbAlbumID, TagField.mbReleaseTrackID, TagField.label, TagField.catalogNumber, TagField.barcode,
-                      TagField.releaseCountry, TagField.releaseStatus, TagField.mbDiscID, TagField.script] {
+                      TagField.releaseCountry, TagField.releaseStatus, TagField.mbDiscID, TagField.script, TagField.isrc] {
             #expect(t[field].isEmpty, "\(field) belongs to one edition")
         }
+        var mine = TagSet()
+        mine.set(TagField.isrc, "USWB19903566")
+        mine.set(TagField.mbAlbumID, "another-release")
+        let merged = TagMerge.merge(existing: mine, proposed: t, keeping: TagField.editionFields).result
+        #expect(merged.first(TagField.isrc) == "USWB19903566", "the files' own ISRC stays")
+        #expect(merged[TagField.mbAlbumID].isEmpty)
     }
 
     @Test func tagsByDiscPosition() throws {

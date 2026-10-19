@@ -122,6 +122,7 @@ struct ContentView: View {
             await extractFromLaunchArguments()
             await identifyFromLaunchArguments()
             await tagFromLaunchArguments()
+            await restoreFromLaunchArguments()
             await batchFromLaunchArguments()
         }
     }
@@ -195,6 +196,22 @@ extension ContentView {
                 verdict = "no plan: " + (tagging.error(for: record) ?? "unknown")
             }
             FileHandle.standardError.write(Data("tag: \(record.displayTitle): \(verdict)\n".utf8))
+        }
+    }
+}
+
+extension ContentView {
+    // `--restore <folder>` puts back the original tags of the albums at or
+    // under that folder that drtagger wrote.
+    func restoreFromLaunchArguments(_ arguments: [String] = CommandLine.arguments) async {
+        guard let i = arguments.firstIndex(of: "--restore"), i + 1 < arguments.count else { return }
+        let folder = NSString(string: arguments[i + 1]).expandingTildeInPath
+        for record in library.allRecords() where library.isLeader(record) && (record.path == folder || record.path.hasPrefix(folder + "/")) {
+            let members = library.members(of: record)
+            guard members.contains(where: { !$0.tagBackups.isEmpty }) else { continue }
+            await tagging.restore(record, members: members)
+            let verdict = tagging.error(for: record).map { "failed – \($0)" } ?? "restored"
+            FileHandle.standardError.write(Data("restore: \(record.displayTitle): \(verdict)\n".utf8))
         }
     }
 }

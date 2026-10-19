@@ -205,7 +205,7 @@ final class TagService {
                 guard let proposed = PicardMapper.trackTags(candidate, media: media, disc: disc, track: track, context: context) else {
                     continue
                 }
-                let (result, changes) = TagMerge.merge(existing: contents.tags, proposed: proposed, locked: locks)
+                let (result, changes) = TagMerge.merge(existing: contents.tags, proposed: proposed, locked: locks, keeping: context.albumOnly ? TagField.editionFields : [])
                 tracks.append(TrackPlan(url: url, index: index, disc: disc, owner: owner, existing: contents.tags, proposed: proposed, result: result, changes: changes,
                                         existingPictures: contents.pictures.map(PictureInfo.init), audioDigest: contents.audioDigest))
                 index += 1
@@ -301,7 +301,7 @@ final class TagService {
         guard var plan = plans[path] else { return }
         plan.tracks = plan.tracks.map { t in
             var t = t
-            (t.result, t.changes) = TagMerge.merge(existing: t.existing, proposed: t.proposed, locked: locks)
+            (t.result, t.changes) = TagMerge.merge(existing: t.existing, proposed: t.proposed, locked: locks, keeping: record.albumOnly ? TagField.editionFields : [])
             return t
         }
         plans[path] = plan

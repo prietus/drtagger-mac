@@ -120,7 +120,8 @@ public enum PicardMapper {
         t.set(TagField.discNumber, String(discNumber))
         t.set(TagField.discSubtitle, medium.title)
         t.set(TagField.media, context.mediaOverride ?? medium.format)
-        for isrc in track.isrcs { t.add(TagField.isrc, isrc) }
+        // ISRCs differ between editions (remasters get their own).
+        if !context.albumOnly { for isrc in track.isrcs { t.add(TagField.isrc, isrc) } }
         if c.source == .musicbrainz {
             t.set(TagField.mbTrackID, track.recordingID)
             if !context.albumOnly { t.set(TagField.mbReleaseTrackID, track.trackID) }

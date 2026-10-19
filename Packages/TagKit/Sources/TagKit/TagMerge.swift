@@ -24,14 +24,14 @@ public struct TagChange: Sendable, Equatable, Hashable, Codable, Identifiable {
 // fields never change.
 public enum TagMerge {
 
-    public static func merge(existing: TagSet, proposed: TagSet, locked: Set<String> = []) -> (result: TagSet, changes: [TagChange]) {
+    public static func merge(existing: TagSet, proposed: TagSet, locked: Set<String> = [], keeping kept: Set<String> = []) -> (result: TagSet, changes: [TagChange]) {
         var result = existing
         let lockedUpper = Set(locked.map { $0.uppercased() })
         for name in proposed.names where !lockedUpper.contains(name) {
             result[name] = proposed[name]
         }
         if !proposed.isEmpty {
-            for name in TagField.identityFields where proposed[name].isEmpty && !lockedUpper.contains(name) {
+            for name in TagField.identityFields.subtracting(kept) where proposed[name].isEmpty && !lockedUpper.contains(name) {
                 result.remove(name)
             }
         }

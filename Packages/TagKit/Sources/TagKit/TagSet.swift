@@ -78,6 +78,11 @@ public enum TagField {
         isrc, mbAlbumID, mbAlbumArtistID, mbArtistID, mbTrackID, mbReleaseTrackID, mbReleaseGroupID, mbWorkID, mbDiscID, discID,
         discogsReleaseID, discSubtitle, work, artists,
     ]
+    // What only one pressing has: kept as they are when the album is tagged
+    // without an edition, since nothing says they are wrong.
+    public static let editionFields: Set<String> = [
+        label, catalogNumber, barcode, releaseCountry, releaseStatus, script, isrc, mbDiscID, discID,
+    ]
 }
 
 // A flat, multi-valued tag map keyed by upper-case Picard names.
