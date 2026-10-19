@@ -27,3 +27,4 @@ Packages/*/.swiftpm/
 
 # Release artifacts (scripts/release.sh)
 /dist/
+*.swp
