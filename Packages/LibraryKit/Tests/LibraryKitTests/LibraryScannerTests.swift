@@ -315,6 +315,29 @@ struct LibraryScannerTests {
         #expect(result.albums.map(\.kind).sorted { $0.rawValue < $1.rawValue } == [.sacdISO, .trackFolder])
     }
 
+    // An accented FILE name must keep its composed bytes: NFS shares store
+    // "È" composed and `appending(path:)` used to decompose it, so the
+    // file was reported missing (found by the Linux port's parity run).
+    @Test func cueFileNamesKeepTheirBytes() throws {
+        let t = try TempTree()
+        defer { t.cleanup() }
+        let name = "03 - \u{00C8} festa.flac"
+        try t.file("Storia/\(name)", bytes: 1)
+        let url = CueFile(name: name, type: "WAVE").url(relativeTo: t.root.appending(path: "Storia"))
+        #expect(Array(url.path.utf8).suffix(Array(name.utf8).count) == Array(name.utf8))
+        #expect(url.existsOnDisk)
+        #expect(CueFile(name: "/" + name, type: "WAVE").url(relativeTo: t.root.appending(path: "Storia")).path == url.path)
+    }
+
+    @Test func cueFileNamesMatchIgnoringCaseAndNormalisation() throws {
+        let t = try TempTree()
+        defer { t.cleanup() }
+        try t.file("Rip/Le\u{00F1}o - Track01.wav", bytes: 1)
+        let found = try #require(CueFile.entry(in: t.root.appending(path: "Rip"), matching: "LEN\u{0303}O - TRACK01.WAV"))
+        #expect(found.lastPathComponent.precomposedStringWithCanonicalMapping == "Le\u{00F1}o - Track01.wav")
+        #expect(CueFile.entry(in: t.root.appending(path: "Rip"), matching: "other.wav") == nil)
+    }
+
     @Test func duplicateRootsAreCollapsed() throws {
         let t = try TempTree()
         defer { t.cleanup() }

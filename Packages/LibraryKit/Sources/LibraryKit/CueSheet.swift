@@ -117,8 +117,29 @@ public struct CueFile: Sendable, Equatable, Hashable, Codable {
         self.tracks = tracks
     }
 
+    // The referenced file next to the sheet. `appending(path:)` would
+    // decompose accents in the name (È → E + U+0300), which names nothing
+    // on an NFS share that stores "È" composed: the path keeps the sheet's
+    // bytes instead. When those miss, the folder is searched ignoring case
+    // and Unicode normalisation, as APFS matches names ("TRACK01.WAV" for
+    // "Track01.wav", a decomposed name in the sheet for a composed file).
     public func url(relativeTo folder: URL) -> URL {
-        folder.appending(path: name, directoryHint: .notDirectory)
+        let relative = name.hasPrefix("/") ? String(name.drop { $0 == "/" }) : name
+        let exact = (folder.path + "/" + relative).withCString {
+            URL(fileURLWithFileSystemRepresentation: $0, isDirectory: false, relativeTo: nil)
+        }
+        if exact.existsOnDisk || relative.contains("/") { return exact }
+        return Self.entry(in: folder, matching: relative) ?? exact
+    }
+
+    static func folded(_ s: String) -> String {
+        s.precomposedStringWithCanonicalMapping.lowercased()
+    }
+
+    static func entry(in folder: URL, matching name: String) -> URL? {
+        let want = folded(name)
+        let entries = (try? FileManager.default.contentsOfDirectory(at: folder.onDisk, includingPropertiesForKeys: nil)) ?? []
+        return entries.first { folded($0.lastPathComponent) == want }
     }
 }
 
