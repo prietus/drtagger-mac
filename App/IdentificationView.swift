@@ -140,6 +140,12 @@ struct IdentificationView: View {
         return VStack(alignment: .leading, spacing: 2) {
             Text(parts.isEmpty ? String(localized: "No identifying signals found") : "Signals: " + parts.joined(separator: " · "))
             Text("Providers: " + providers.joined(separator: " · "))
+            // Japanese reissues and SACD editions are often on Discogs only.
+            if !settings.isDiscogsConfigured, !result.isConfident {
+                Label("Discogs is not set up: many editions (Japanese reissues, SACDs) are only there. Add a token in Settings → Providers.", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                    .padding(.top, 2)
+            }
         }
         .font(.caption)
         .foregroundStyle(.secondary)

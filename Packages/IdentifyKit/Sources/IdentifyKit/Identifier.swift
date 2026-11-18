@@ -364,7 +364,10 @@ public actor Identifier {
         // the album (folder names are often too messy to search); the
         // artist stays the files' own, a performer more often than not.
         let canonical = order.first { origins[$0]?.contains(.fingerprint) == true }.flatMap { pool[$0] }
-        let sacdQuery = (artist: signals.artistHint ?? canonical?.artist ?? "", title: canonical?.title ?? signals.folderAlbumHint ?? signals.albumHint ?? "")
+        // A SACD image carries its own title in the master TOC: better than
+        // the name of the file ("iso.iso").
+        let discTitle = signals.isSACDImage ? signals.albumHint : nil
+        let sacdQuery = (artist: signals.artistHint ?? canonical?.artist ?? "", title: canonical?.title ?? discTitle ?? signals.folderAlbumHint ?? signals.albumHint ?? "")
         let needsSACD = { signals.localFormat == .sacd && !sacdQuery.title.isEmpty && !order.contains { MatchScorer.isSACDEdition(pool[$0]!) } }
         if needsSACD() {
             let rs = (try? await musicBrainz.searchReleases(artist: sacdQuery.artist, album: sacdQuery.title, format: "SACD", limit: 10)) ?? []

@@ -196,6 +196,16 @@ public enum MatchScorer {
             score += 30; strong += 1
             reasons.append("Catalog number \(hit) matches")
         }
+        // A SACD image names its own catalog number in the master TOC (not
+        // the box's): when that exact number is a SACD edition's, the disc
+        // has identified itself, as a disc ID would.
+        if signals.isSACDImage, isSACDEdition(candidate), signals.catalogNumbers.contains(where: { v in
+            let n = CatalogNumberParser.normalize(v.value)
+            return v.origin == .sacdText && v.detail == nil && !n.isEmpty && candCatalogs.contains(n)
+        }) {
+            score += 15; strong += 1
+            reasons.append("The disc's own catalog number names this SACD edition")
+        }
         let discIDHits = signals.allDiscIDs.intersection(candidate.allDiscIDs)
         if !discIDHits.isEmpty {
             score += 45 + 5 * Double(discIDHits.count - 1); strong += 1

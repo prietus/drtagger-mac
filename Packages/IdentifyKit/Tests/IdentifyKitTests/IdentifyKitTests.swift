@@ -136,6 +136,32 @@ struct MatchScorerTests {
         #expect(hybridForCD.reasons.contains("CD edition"))
     }
 
+    @Test func sacdDiscCatalogIdentifiesItsEdition() {
+        // An Esoteric SACD: its master TOC names ESSJ-90329 (the disc) and
+        // the original label's barcode (the album set).
+        let layer = [157, 200, 180].enumerated().map { CandidateTrack(position: $0.offset + 1, title: "T", durationMS: $0.element * 1000) }
+        let esoteric = Candidate(source: .discogs, providerID: "38985767", title: "I Just Dropped By To Say Hello", artist: "Johnny Hartman",
+                                 year: "2026", country: "Japan", catalogNumber: "ESSJ-90329", mediaFormat: "SACD", trackCount: 3, tracks: layer,
+                                 media: [CandidateMedium(position: 1, format: "SACD", tracks: layer)])
+        var iso = Self.signals(durations: [157, 200, 180])
+        iso.isDSD = true; iso.isSACDImage = true
+        iso.artistHint = "Johnny Hartman"; iso.albumHint = "I JUST DROPPED BY TO SAY HELLO"; iso.yearHint = nil
+        iso.catalogNumbers = [SignalValue("ESSJ-90329      ", origin: .sacdText), SignalValue("0602488540667", origin: .sacdText, detail: "album set")]
+        let scored = MatchScorer.score(esoteric, signals: iso, origins: [.catalogNumber], fingerprintVote: nil, fingerprintedTracks: 0)
+        #expect(scored.reasons.contains("The disc's own catalog number names this SACD edition"))
+        #expect(scored.confidence == .confident)
+
+        // Only the disc's own number counts, and only for a SACD edition.
+        var boxOnly = iso
+        boxOnly.catalogNumbers = [SignalValue("ESSJ-90329", origin: .sacdText, detail: "album set")]
+        #expect(MatchScorer.score(esoteric, signals: boxOnly, origins: [.catalogNumber], fingerprintVote: nil, fingerprintedTracks: 0).confidence == .likely)
+        let cd = Candidate(source: .discogs, providerID: "cd", title: "I Just Dropped By To Say Hello", artist: "Johnny Hartman",
+                           catalogNumber: "ESSJ-90329", mediaFormat: "CD", trackCount: 3, tracks: layer,
+                           media: [CandidateMedium(position: 1, format: "CD", tracks: layer)])
+        #expect(!MatchScorer.score(cd, signals: iso, origins: [.catalogNumber], fingerprintVote: nil, fingerprintedTracks: 0)
+            .reasons.contains("The disc's own catalog number names this SACD edition"))
+    }
+
     @Test func folderHintsSeparateEditions() {
         // "Linkin Park - 2003 - Meteora 20th Anniversary Edition (MQA)" as the
         // collector reads it, with no track information at all.
