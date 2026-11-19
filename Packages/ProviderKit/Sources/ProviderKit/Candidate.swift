@@ -84,6 +84,18 @@ public struct Candidate: Sendable, Identifiable, Equatable, Codable, Hashable {
     public let script: String?               // "Latn", "Jpan", …
 
     public var id: String { source.rawValue + ":" + providerID }
+
+    // The same release with another tracklist (what the discs themselves
+    // list when the release's own is missing or unusable).
+    public func replacingTracklist(_ media: [CandidateMedium]) -> Candidate {
+        let all = media.flatMap(\.tracks)
+        return Candidate(source: source, providerID: providerID, releaseGroupID: releaseGroupID, title: title, artist: artist,
+                         year: year, country: country, label: label, catalogNumber: catalogNumber, mediaFormat: mediaFormat,
+                         trackCount: all.count, disambiguation: disambiguation, coverArtURL: coverArtURL, tracks: all,
+                         releasedDate: releasedDate, genres: genres, styles: styles, formatDescriptions: formatDescriptions,
+                         barcode: barcode, media: media, status: status, primaryType: primaryType, artistCredits: artistCredits,
+                         secondaryTypes: secondaryTypes, firstReleaseDate: firstReleaseDate, script: script)
+    }
     public var artistSort: String? { artistCredits.isEmpty ? nil : ArtistCredit.sortJoined(artistCredits) }
     public var artistIDs: [String] { artistCredits.compactMap(\.artistID) }
 
@@ -203,6 +215,34 @@ public struct Candidate: Sendable, Identifiable, Equatable, Codable, Hashable {
     // several labels are credited.
     public var catalogNumbers: [String] {
         (catalogNumber ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    // Catalog numbers to compare a disc's with: "&" and ";" join numbers
+    // as "," does, and a range written the Japanese way ("ESSD-90109/13",
+    // "TOGE-12061~3") stands for every number in it. Tags keep the
+    // release's own spelling (catalogNumbers).
+    public var matchingCatalogNumbers: [String] {
+        (catalogNumber ?? "")
+            .split(whereSeparator: { $0 == "," || $0 == "&" || $0 == ";" })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .flatMap(Self.expandingRange)
+    }
+
+    static func expandingRange(_ s: String) -> [String] {
+        guard let sep = s.lastIndex(where: { $0 == "/" || $0 == "~" }) else { return [s] }
+        let head = s[..<sep].trimmingCharacters(in: .whitespaces)
+        let tail = s[s.index(after: sep)...].trimmingCharacters(in: .whitespaces)
+        let width = head.reversed().prefix(while: { $0.isASCII && $0.isNumber }).count
+        guard width > 0, !tail.isEmpty, tail.count <= width, tail.allSatisfy({ $0.isASCII && $0.isNumber }) else { return [s] }
+        let prefix = head.dropLast(width)
+        let first = head.suffix(width)
+        let last = first.prefix(width - tail.count) + tail
+        guard let a = Int(first), let b = Int(last), b > a, b - a < 50 else { return [s] }
+        return (a...b).map { n in
+            let digits = String(n)
+            return prefix + String(repeating: "0", count: max(0, width - digits.count)) + digits
+        }
     }
 }
 

@@ -114,3 +114,22 @@ import Testing
         #expect(c.media.count == 1 && c.media[0].tracks.count == 2 && c.allTracks.map(\.durationMS) == [44000, 218000])
     }
 }
+
+@Suite struct CatalogRangeTests {
+    @Test func rangesAndJoinersExpandForMatching() {
+        let box = Candidate(source: .discogs, providerID: "14837607", title: "5 Great Operas", artist: "Various",
+                            catalogNumber: "ESSD-90109/13 & ESSG-90114/17")
+        #expect(box.matchingCatalogNumbers == ["ESSD-90109", "ESSD-90110", "ESSD-90111", "ESSD-90112", "ESSD-90113",
+                                               "ESSG-90114", "ESSG-90115", "ESSG-90116", "ESSG-90117"])
+        #expect(box.catalogNumbers == ["ESSD-90109/13 & ESSG-90114/17"], "tags keep the release's spelling")
+        let tilde = Candidate(source: .musicbrainz, providerID: "t", title: "X", artist: "Y", catalogNumber: "TOGE-12061~3, B0035163-06")
+        #expect(tilde.matchingCatalogNumbers == ["TOGE-12061", "TOGE-12062", "TOGE-12063", "B0035163-06"])
+        let padded = Candidate(source: .musicbrainz, providerID: "p", title: "X", artist: "Y", catalogNumber: "ABC-0098/101")
+        #expect(padded.matchingCatalogNumbers == ["ABC-0098", "ABC-0099", "ABC-0100", "ABC-0101"])
+        // Not ranges: a slash between words, a shorter "end", a huge span.
+        for odd in ["AS-57 / B0009784-02", "SRCS 1234/0", "X-1/999"] {
+            let c = Candidate(source: .musicbrainz, providerID: "o", title: "X", artist: "Y", catalogNumber: odd)
+            #expect(c.matchingCatalogNumbers == [odd], "\(odd)")
+        }
+    }
+}

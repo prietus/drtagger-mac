@@ -188,7 +188,7 @@ public enum MatchScorer {
             score += 40; strong += 1
             reasons.append("Barcode \(barcode) matches")
         }
-        let candCatalogs = candidate.catalogNumbers.map(CatalogNumberParser.normalize)
+        let candCatalogs = candidate.matchingCatalogNumbers.map(CatalogNumberParser.normalize)
         if let hit = signals.uniqueCatalogNumbers.first(where: { local in
             let n = CatalogNumberParser.normalize(local)
             return !n.isEmpty && candCatalogs.contains { $0 == n || (n.count >= 6 && ($0.hasSuffix(n) || n.hasSuffix($0))) }
@@ -331,7 +331,7 @@ public enum MatchScorer {
         let catalogs = signals.uniqueCatalogNumbers.map(CatalogNumberParser.normalize).filter { $0.count >= 4 }
         guard !barcodes.isEmpty || !catalogs.isEmpty else { return false }
         if let b = candidate.barcode, barcodes.contains(where: { barcodesEqual($0, b) }) { return false }
-        let mine = candidate.catalogNumbers.map(CatalogNumberParser.normalize)
+        let mine = candidate.matchingCatalogNumbers.map(CatalogNumberParser.normalize)
         if catalogs.contains(where: { local in mine.contains { $0 == local || (local.count >= 6 && ($0.hasSuffix(local) || local.hasSuffix($0))) } }) { return false }
         return true
     }
@@ -381,8 +381,8 @@ public enum MatchScorer {
     public static func areTwins(_ a: Candidate, _ b: Candidate) -> Bool {
         guard isSACDEdition(a) == isSACDEdition(b) else { return false }
         if let x = a.barcode, let y = b.barcode, barcodesEqual(x, y) { return true }
-        let ca = Set(a.catalogNumbers.map(CatalogNumberParser.normalize).filter { !$0.isEmpty })
-        let cb = Set(b.catalogNumbers.map(CatalogNumberParser.normalize).filter { !$0.isEmpty })
+        let ca = Set(a.matchingCatalogNumbers.map(CatalogNumberParser.normalize).filter { !$0.isEmpty })
+        let cb = Set(b.matchingCatalogNumbers.map(CatalogNumberParser.normalize).filter { !$0.isEmpty })
         return !ca.isDisjoint(with: cb)
     }
 

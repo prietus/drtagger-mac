@@ -167,7 +167,7 @@ final class TagService {
         }
 
         let identification = leader.identification
-        let media = MatchScorer.relevantMedia(candidate, localFormat: identification?.signals.localFormat ?? .unknown)
+        var media = MatchScorer.relevantMedia(candidate, localFormat: identification?.signals.localFormat ?? .unknown)
         let mediaList = media.isEmpty ? [CandidateMedium(position: 1, tracks: candidate.tracks)] : media
         var context = TagContext()
         context.discogs = identification?.discogsCandidates.first
@@ -199,6 +199,30 @@ final class TagService {
         let reads: [(URL, Int, Int, String, Result<ContainerContents, any Error>)] = await Task.detached {
             targets.map { t in (t.url, t.disc, t.track, t.owner, Result { try TaggedFile.readForPreview(t.url) }) }
         }.value
+
+        // A release without a usable tracklist (Discogs lists some Esoteric
+        // boxes with one line per opera): when every disc is a SACD image,
+        // its extracted files carry the disc text, so the tracks come from
+        // them and only the album fields from the release.
+        let localDiscCount = targets.map(\.disc).max() ?? 1
+        let releaseTotal = mediaList.reduce(0) { $0 + $1.tracks.count }
+        let unusable = mediaList.count < localDiscCount || releaseTotal * 2 < targets.count
+        if unusable, members.allSatisfy({ $0.kind == .sacdISO }) {
+            var byDisc: [Int: [CandidateTrack]] = [:]
+            for (url, disc, track, _, read) in reads {
+                let tags = (try? read.get())?.tags
+                let title = tags?.first(TagField.title) ?? url.deletingPathExtension().lastPathComponent
+                let artist = tags?.first(TagField.artist)
+                byDisc[disc, default: []].append(CandidateTrack(position: track + 1, title: title, artist: artist,
+                                                                artistCredits: artist.map { [ArtistCredit(name: $0)] } ?? []))
+            }
+            let discs = (1...localDiscCount).map { d in
+                CandidateMedium(position: d, format: "SACD", tracks: (byDisc[d] ?? []).sorted { $0.position < $1.position })
+            }
+            candidate = candidate.replacingTracklist(discs)
+            media = discs
+            warnings = [String(localized: "The release lists \(releaseTotal) track(s) for \(targets.count) files: album fields come from the release, track titles and artists from the discs themselves.")]
+        }
         var tracks: [TrackPlan] = []
         var index = 0
         var localCover: Data?

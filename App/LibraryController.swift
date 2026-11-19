@@ -345,7 +345,18 @@ final class LibraryController {
 
     private func assign(_ records: [AlbumRecord]) {
         let id = UUID().uuidString
+        // SACDs that do not number themselves (each "disc 1 of 1", as in
+        // some Esoteric boxes) still carry consecutive catalog numbers
+        // (ESSD-90109, -90110…): the box's order.
+        let catalogs = records.map { $0.detected?.sacd?.discCatalogNumber.trimmingCharacters(in: .whitespaces) ?? "" }
+        let byCatalog = records.allSatisfy { $0.kind == .sacdISO && $0.detected?.discPosition == nil }
+            && !catalogs.contains("") && Set(catalogs).count == catalogs.count
         let ordered = records.sorted { a, b in
+            if byCatalog {
+                let ca = a.detected?.sacd?.discCatalogNumber.trimmingCharacters(in: .whitespaces) ?? ""
+                let cb = b.detected?.sacd?.discCatalogNumber.trimmingCharacters(in: .whitespaces) ?? ""
+                return ca.localizedStandardCompare(cb) == .orderedAscending
+            }
             let pa = a.detected?.discPosition?.number ?? Int.max, pb = b.detected?.discPosition?.number ?? Int.max
             return pa != pb ? pa < pb : a.displayTitle.localizedStandardCompare(b.displayTitle) == .orderedAscending
         }

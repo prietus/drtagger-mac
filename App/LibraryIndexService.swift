@@ -67,7 +67,7 @@ final class LibraryIndexService {
 
     func duplicates(of c: Candidate, excluding folders: Set<String>) -> [LibraryIndexEntry] {
         let key: String? = c.source == .musicbrainz ? "mb:" + c.providerID.lowercased() : c.source == .discogs ? "discogs:" + c.providerID : nil
-        return LibraryIndexer.duplicates(in: entries, releaseKey: key, barcode: c.barcode, catalogNumbers: c.catalogNumbers, excluding: folders)
+        return LibraryIndexer.duplicates(in: entries, releaseKey: key, barcode: c.barcode, catalogNumbers: c.matchingCatalogNumbers, excluding: folders)
     }
 
     private func save() {
